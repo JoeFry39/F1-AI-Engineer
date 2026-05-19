@@ -230,3 +230,24 @@ storage/*.csv
 storage/*.db
 logs/
 logs/*
+
+# AI / ML artifacts
+
+ai/models/
+ai/models/*
+ai/training/checkpoints/
+ai/training/checkpoints/*
+*.pt
+*.pth
+*.onnx
+*.pkl
+*.joblib
+
+# Visualisation outputs
+
+visualisation/outputs/
+plots/
+graphs/
+*.png
+*.jpg
+*.svg
