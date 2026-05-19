@@ -216,3 +216,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# F1 AI Engineer - runtime telemetry data
+
+sessions/
+sessions/*
+replays/
+replays/*
+data/
+data/*
+storage/*.json
+storage/*.csv
+storage/*.db
+logs/
+logs/*
