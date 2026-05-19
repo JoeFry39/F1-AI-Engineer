@@ -1,7 +1,5 @@
 # F1-AI-Engineer
 
-# F1 AI Engineer
-
 Real-time AI race engineer system for F1 25 telemetry.
 
 ## Goals
