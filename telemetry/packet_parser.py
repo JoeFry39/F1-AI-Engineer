@@ -915,7 +915,7 @@ def parse_event_packet(header: PacketHeader, buf: BufferReader) -> PacketEventDa
         v1, v2 = buf.read("BB")
         details = EventCollision(vehicle1_idx=v1, vehicle2_idx=v2)
     
-    return PacketEventData(header=header, event_string_code=code, event_data=details)
+    return PacketEventData(header=header, event_string_code=code, event_details=details)
 
 ## Packet 4 - Participants
 
