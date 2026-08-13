@@ -69,7 +69,7 @@ class PacketParser:
                     return None
                 dispatch_table = self._parsers_by_format[models.PACKET_FORMAT_26]
 
-            parser_fn = self._parsers.get(header.packet_id)
+            parser_fn = dispatch_table.get(header.packet_id)
             if parser_fn is None:
                 self.packets_unknown += 1
                 return None

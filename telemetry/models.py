@@ -806,7 +806,7 @@ class EventCollision:
 class PacketEventData:
     header: PacketHeader
     event_string_code: bytes
-    event_data: Any
+    event_details: Any
 
     @property
     def event_name(self) -> str:
@@ -966,7 +966,7 @@ class CarStatusData:
     tyres_age_laps: int
     vehicle_fia_flags: int              ## -1 = invalid/unknown, 0 = none, 1 = green, 2 = blue, 3 = yellow
     engine_power_ice: float             ## W
-    engine_power_ers: float             ## W
+    engine_power_mguk: float             ## W
     ers_store_energy: float             ## J
     ers_deploy_mode: int
     ers_harvested_this_lap_mguk: float
@@ -975,10 +975,6 @@ class CarStatusData:
     network_paused: int
     ## F1 2026 DLC
     ers_harvest_limit_per_lap: Optional[int] = None
-
-    @property
-    def engine_power_ers(self) -> float:
-        return self.engine_power_mguk
 
     @property
     def actual_tyre_name(self) -> str:
