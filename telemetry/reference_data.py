@@ -238,7 +238,7 @@ class FastF1Loader:
             location: str,
             session_type: str,
             max_drivers: int = 3,
-    ) -> List[ReferenceError]:
+    ) -> List[ReferenceProfile]:
         self._ensure_cache()
         try:
             import fastf1
@@ -312,7 +312,7 @@ class FastF1Loader:
         else:
             lap_time_ms = 0
         try:
-            tel = fastest_lap.get_car_fata().add_distance()
+            tel = fastest_lap.get_car_data().add_distance()
         except Exception as e:
             logger.warning(f"Telemetry load failed for {driver_code}: {e}")
             return None
@@ -346,7 +346,7 @@ class FastF1Loader:
 
     def _interpolate_to_distance_axis(self, tel, track_length_m: float) -> Tuple:
         raw_dist = tel["Distance"].to_numpy(dtype=np.float64)
-        target_dist = np.arrange(0, int(track_length_m) + 1, dtype=np.float32)
+        target_dist = np.arange(0, int(track_length_m) + 1, dtype=np.float32)
 
         def interp_continuous(col_name: str) -> np.ndarray:
             if col_name not in tel.columns:
@@ -372,6 +372,8 @@ class FastF1Loader:
         rpm_arr = interp_continuous("RPM")
         if "Brake" in tel.columns:
             raw_brake = tel["Brake"].to_numpy().astype(np.float64)
+            if np.nanmax(raw_brake) > 1.0:
+                raw_brake = raw_brake / 100.0
             brake_arr = np.interp(target_dist, raw_dist, raw_brake).astype(np.float32)
         else:
             brake_arr = np.zeros(len(target_dist), dtype = np.float32)
@@ -396,11 +398,19 @@ class FastF1Loader:
         window = 30
         apex_indices = []
         for i in range(window, n - window):
-            if speed_arr[i] < self.CORNER_APEX_SPEED_THRESHOLD_KPH:
-                local_min = np.min(speed_arr[max(0, i-window):min(n, i+window)])
-                if abs(speed_arr[i] - local_min) < 2.0:
-                    if speed_arr[i] < speed_arr[i - window] and speed_arr[i] < speed_arr[i+window]:
-                        apex_indices.append(i)
+            if speed_arr[i] >= self.CORNER_APEX_SPEED_THRESHOLD_KPH:
+                continue
+            left = speed_arr[max(0, i-window):i]
+            right = speed_arr[i+1:min(n, i+window+1)]
+            if len(left) == 0 or len(right) == 0:
+                continue
+            if(speed_arr[i] <= np.min(left) and speed_arr[i] <= np.min(right)):
+                apex_indices.append(i)
+                # local_min = np.min(speed_arr[max(0, i-window):min(n, i+window)])
+                # if abs(speed_arr[i] - local_min) < 2.0:
+                #     if speed_arr[i] < speed_arr[i - window] and speed_arr[i] < speed_arr[i+window]:
+                #         apex_indices.append(i)
+
         merged = []
         skip_until = -1
         for i, idx in enumerate(apex_indices):
@@ -575,8 +585,8 @@ class ReferenceDataManager:
             regulations_2026: bool,
     ) -> Tuple[bool, str]:
         if track_id in NO_REFERENCE_TRACKS:
-            return True
-        return False
+            return True, "No reference data available"
+        return False, ""
 
     def _has_2026_race_occurred(self, location: str) -> bool:
         try:
@@ -706,22 +716,22 @@ class ReferenceDataManager:
         elif state == LoadState.READY:
             drivers = ", ".join(p.driver_code for p in self.all_profiles)
             base = f"Reference data ready: {drivers}"
-            if self._regulation_warning:
-                base += (
-                    f"-- WARNING: 2026-spec car vs 2025 data "
-                    f"(2026 race not yet run at this circuit). "
-                    f"Comparison accuracy will improve as the 2026 season progresses"
-                )
-                return base
-            elif state == LoadState.FAILED:
-                return "Reference data unavailable -- self-comparison only"
-            elif state == LoadState.BYPASSED:
-                return f"Reference bypassed: {self._bypass_reason}"
-            return "Unknown"
-
-        def __repr__(self) -> str:
-            return (
-                f"ReferenceDataManager("
-                f"state={self._load_state.name}, "
-                f"profiles={list(self._profiles.keys())})"
+        if self._regulation_warning:
+            base += (
+                f"-- WARNING: 2026-spec car vs 2025 data "
+                f"(2026 race not yet run at this circuit). "
+                f"Comparison accuracy will improve as the 2026 season progresses"
             )
+            return base
+        elif state == LoadState.FAILED:
+            return "Reference data unavailable -- self-comparison only"
+        elif state == LoadState.BYPASSED:
+            return f"Reference bypassed: {self._bypass_reason}"
+        return "Unknown"
+
+    def __repr__(self) -> str:
+        return (
+            f"ReferenceDataManager("
+            f"state={self._load_state.name}, "
+            f"profiles={list(self._profiles.keys())})"
+        )

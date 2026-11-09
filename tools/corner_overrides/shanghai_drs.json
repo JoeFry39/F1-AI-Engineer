@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "zones": {
+    "1": {
+      "activation_m": 5270.0,
+      "end_m": 500.0,
+      "detection_m": 5096.0,
+      "no_detection": false
+    },
+    "2": {
+      "activation_m": 1146.0,
+      "end_m": 1534.0
+    },
+    "3": {
+      "activation_m": 2736.0,
+      "end_m": 3092.0
+    },
+    "4": {
+      "activation_m": 3594.0,
+      "detection_m": 3196.0,
+      "no_detection": false
+    }
+  }
+}

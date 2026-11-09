@@ -4,13 +4,13 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Optional, List, Dict, Tuple, Any
 
-from telemetry_state import(
+from telemetry.telemetry_state import(
     TelemetryState,
     CarState,
     SessionState,
     LapRecord,
 )
-from packet_parser import(
+from telemetry.packet_parser import(
     _ms_to_time_str,
     TYRE_COMPOUNDS_VISUAL,
     ERS_DEPLOY_MODES,

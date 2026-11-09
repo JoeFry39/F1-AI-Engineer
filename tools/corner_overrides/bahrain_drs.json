@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "zones": {
+    "1": {
+      "activation_m": 5062.0
+    },
+    "3": {
+      "detection_m": 2524.0,
+      "no_detection": false
+    }
+  }
+}

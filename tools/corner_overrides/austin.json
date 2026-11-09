@@ -1,0 +1,776 @@
+{
+  "version": 2,
+  "ignore_apex_m": [],
+  "assignments": {
+    "1": [
+      632.0
+    ],
+    "2": [
+      835.0
+    ],
+    "3": [
+      1136.0
+    ],
+    "4": [
+      1246.0
+    ],
+    "5": [
+      1310.0
+    ],
+    "6": [
+      1534.0
+    ],
+    "7": [
+      1670.0
+    ],
+    "8": [
+      1832.0
+    ],
+    "9": [
+      1938.0
+    ],
+    "10": [
+      2152.0
+    ],
+    "11": [
+      2528.0
+    ],
+    "12": [
+      3728.0
+    ],
+    "13": [
+      3962.0
+    ],
+    "14": [
+      4030.0
+    ],
+    "15": [
+      4232.0
+    ],
+    "16": [
+      4438.0
+    ],
+    "17": [
+      4516.0
+    ],
+    "18": [
+      4692.0
+    ],
+    "19": [
+      4988.0
+    ],
+    "20": [
+      5278.0
+    ]
+  },
+  "detections": [
+    {
+      "curv_sign": 1,
+      "brake_type": "brake",
+      "shared_braking": false,
+      "distance_start_m": 556.0,
+      "distance_apex_m": 632.0,
+      "distance_end_m": 728.0,
+      "distance_exit_m": 696.0,
+      "reference_apex_speed_kph": 84.0,
+      "heading_change_deg": 153.6,
+      "radius_m": 26.9,
+      "estimated_lateral_g": 2.7,
+      "distance_brake_m": 534.0,
+      "reference_braking_zone_m": 112.0
+    },
+    {
+      "curv_sign": -1,
+      "brake_type": "flat",
+      "shared_braking": false,
+      "distance_start_m": 749.0,
+      "distance_apex_m": 835.0,
+      "distance_end_m": 1013.0,
+      "distance_exit_m": 928.0,
+      "reference_apex_speed_kph": 177.5,
+      "heading_change_deg": 85.6,
+      "radius_m": 114.8,
+      "estimated_lateral_g": 3.75,
+      "distance_brake_m": null,
+      "reference_braking_zone_m": null
+    },
+    {
+      "curv_sign": 1,
+      "brake_type": "flat",
+      "shared_braking": false,
+      "distance_start_m": 1040.0,
+      "distance_apex_m": 1136.0,
+      "distance_end_m": 1174.0,
+      "distance_exit_m": 1174.0,
+      "reference_apex_speed_kph": 273.1,
+      "heading_change_deg": 31.6,
+      "radius_m": 131.7,
+      "estimated_lateral_g": 4.86,
+      "distance_brake_m": null,
+      "reference_braking_zone_m": null
+    },
+    {
+      "curv_sign": -1,
+      "brake_type": "lift",
+      "shared_braking": false,
+      "distance_start_m": 1190.0,
+      "distance_apex_m": 1246.0,
+      "distance_end_m": 1276.0,
+      "distance_exit_m": 1280.0,
+      "reference_apex_speed_kph": 282.3,
+      "heading_change_deg": 29.8,
+      "radius_m": 107.9,
+      "estimated_lateral_g": 5.95,
+      "distance_brake_m": 1229.0,
+      "reference_braking_zone_m": null
+    },
+    {
+      "curv_sign": 1,
+      "brake_type": "lift",
+      "shared_braking": false,
+      "distance_start_m": 1282.0,
+      "distance_apex_m": 1310.0,
+      "distance_end_m": 1366.0,
+      "distance_exit_m": 1374.0,
+      "reference_apex_speed_kph": 265.0,
+      "heading_change_deg": 44.8,
+      "radius_m": 77.9,
+      "estimated_lateral_g": 8.25,
+      "distance_brake_m": 1254.0,
+      "reference_braking_zone_m": null
+    },
+    {
+      "curv_sign": -1,
+      "brake_type": "lift",
+      "shared_braking": false,
+      "distance_start_m": 1376.0,
+      "distance_apex_m": 1534.0,
+      "distance_end_m": 1604.0,
+      "distance_exit_m": 1554.0,
+      "reference_apex_speed_kph": 231.0,
+      "heading_change_deg": 100.9,
+      "radius_m": 88.0,
+      "estimated_lateral_g": 4.88,
+      "distance_brake_m": 1410.0,
+      "reference_braking_zone_m": null
+    },
+    {
+      "curv_sign": 1,
+      "brake_type": "brake",
+      "shared_braking": false,
+      "distance_start_m": 1614.0,
+      "distance_apex_m": 1670.0,
+      "distance_end_m": 1760.0,
+      "distance_exit_m": 1728.0,
+      "reference_apex_speed_kph": 203.2,
+      "heading_change_deg": 75.8,
+      "radius_m": 61.0,
+      "estimated_lateral_g": 6.19,
+      "distance_brake_m": 1638.0,
+      "reference_braking_zone_m": 76.0
+    },
+    {
+      "curv_sign": -1,
+      "brake_type": "brake",
+      "shared_braking": false,
+      "distance_start_m": 1772.0,
+      "distance_apex_m": 1832.0,
+      "distance_end_m": 1902.0,
+      "distance_exit_m": 1902.0,
+      "reference_apex_speed_kph": 143.2,
+      "heading_change_deg": 88.2,
+      "radius_m": 54.8,
+      "estimated_lateral_g": 3.59,
+      "distance_brake_m": 1788.0,
+      "reference_braking_zone_m": 88.0
+    },
+    {
+      "curv_sign": 1,
+      "brake_type": "lift",
+      "shared_braking": true,
+      "distance_start_m": 1908.0,
+      "distance_apex_m": 1938.0,
+      "distance_end_m": 2024.0,
+      "distance_exit_m": 1938.0,
+      "reference_apex_speed_kph": 155.2,
+      "heading_change_deg": 52.6,
+      "radius_m": 63.1,
+      "estimated_lateral_g": 3.97,
+      "distance_brake_m": 1764.0,
+      "reference_braking_zone_m": null
+    },
+    {
+      "curv_sign": 1,
+      "brake_type": "flat",
+      "shared_braking": false,
+      "distance_start_m": 2056.0,
+      "distance_apex_m": 2152.0,
+      "distance_end_m": 2221.0,
+      "distance_exit_m": 2221.0,
+      "reference_apex_speed_kph": 222.6,
+      "heading_change_deg": 35.6,
+      "radius_m": 141.7,
+      "estimated_lateral_g": 3.65,
+      "distance_brake_m": null,
+      "reference_braking_zone_m": null
+    },
+    {
+      "curv_sign": 1,
+      "brake_type": "brake",
+      "shared_braking": false,
+      "distance_start_m": 2454.0,
+      "distance_apex_m": 2528.0,
+      "distance_end_m": 2622.0,
+      "distance_exit_m": 2580.0,
+      "reference_apex_speed_kph": 76.1,
+      "heading_change_deg": 149.9,
+      "radius_m": 27.0,
+      "estimated_lateral_g": 2.51,
+      "distance_brake_m": 2444.0,
+      "reference_braking_zone_m": 104.0
+    },
+    {
+      "curv_sign": 1,
+      "brake_type": "brake",
+      "shared_braking": false,
+      "distance_start_m": 3656.0,
+      "distance_apex_m": 3728.0,
+      "distance_end_m": 3816.0,
+      "distance_exit_m": 3780.0,
+      "reference_apex_speed_kph": 91.2,
+      "heading_change_deg": 129.9,
+      "radius_m": 32.7,
+      "estimated_lateral_g": 2.37,
+      "distance_brake_m": 3620.0,
+      "reference_braking_zone_m": 128.0
+    },
+    {
+      "curv_sign": -1,
+      "brake_type": "brake",
+      "shared_braking": false,
+      "distance_start_m": 3840.0,
+      "distance_apex_m": 3962.0,
+      "distance_end_m": 4088.0,
+      "distance_exit_m": 4024.0,
+      "reference_apex_speed_kph": 101.3,
+      "heading_change_deg": 196.4,
+      "radius_m": 37.2,
+      "estimated_lateral_g": 2.38,
+      "distance_brake_m": 3880.0,
+      "reference_braking_zone_m": 86.0
+    },
+    {
+      "curv_sign": 1,
+      "brake_type": "brake",
+      "shared_braking": false,
+      "distance_start_m": 4098.0,
+      "distance_apex_m": 4232.0,
+      "distance_end_m": 4314.0,
+      "distance_exit_m": 4286.0,
+      "reference_apex_speed_kph": 88.3,
+      "heading_change_deg": 188.3,
+      "radius_m": 29.3,
+      "estimated_lateral_g": 2.2,
+      "distance_brake_m": 4134.0,
+      "reference_braking_zone_m": 106.0
+    },
+    {
+      "curv_sign": -1,
+      "brake_type": "flat",
+      "shared_braking": false,
+      "distance_start_m": 4344.0,
+      "distance_apex_m": 4516.0,
+      "distance_end_m": 4842.0,
+      "distance_exit_m": 4842.0,
+      "reference_apex_speed_kph": 164.5,
+      "heading_change_deg": 187.6,
+      "radius_m": 90.3,
+      "estimated_lateral_g": 5.29,
+      "distance_brake_m": null,
+      "reference_braking_zone_m": null
+    },
+    {
+      "curv_sign": 1,
+      "brake_type": "brake",
+      "shared_braking": false,
+      "distance_start_m": 4862.0,
+      "distance_apex_m": 4988.0,
+      "distance_end_m": 5060.0,
+      "distance_exit_m": 5008.0,
+      "reference_apex_speed_kph": 221.0,
+      "heading_change_deg": 84.8,
+      "radius_m": 75.5,
+      "estimated_lateral_g": 5.39,
+      "distance_brake_m": 4902.0,
+      "reference_braking_zone_m": 96.0
+    },
+    {
+      "curv_sign": 1,
+      "brake_type": "brake",
+      "shared_braking": false,
+      "distance_start_m": 5194.0,
+      "distance_apex_m": 5278.0,
+      "distance_end_m": 5374.0,
+      "distance_exit_m": 5324.0,
+      "reference_apex_speed_kph": 106.1,
+      "heading_change_deg": 124.0,
+      "radius_m": 37.0,
+      "estimated_lateral_g": 2.71,
+      "distance_brake_m": 5208.0,
+      "reference_braking_zone_m": 92.0
+    },
+    {
+      "curv_sign": -1,
+      "brake_type": "brake",
+      "shared_braking": false,
+      "distance_start_m": 4030.0,
+      "distance_apex_m": 4030.0,
+      "distance_end_m": 4030.0,
+      "distance_exit_m": 4030.0,
+      "reference_apex_speed_kph": 101.3,
+      "heading_change_deg": 196.4,
+      "radius_m": 37.2,
+      "estimated_lateral_g": 2.38,
+      "distance_brake_m": 3880.0,
+      "reference_braking_zone_m": 86.0,
+      "manual": true
+    },
+    {
+      "curv_sign": -1,
+      "brake_type": "flat",
+      "shared_braking": false,
+      "distance_start_m": 4438.0,
+      "distance_apex_m": 4438.0,
+      "distance_end_m": 4438.0,
+      "distance_exit_m": 4842.0,
+      "reference_apex_speed_kph": 164.5,
+      "heading_change_deg": 187.6,
+      "radius_m": 90.3,
+      "estimated_lateral_g": 5.29,
+      "distance_brake_m": null,
+      "reference_braking_zone_m": null,
+      "manual": true
+    },
+    {
+      "curv_sign": -1,
+      "brake_type": "flat",
+      "shared_braking": false,
+      "distance_start_m": 4692.0,
+      "distance_apex_m": 4692.0,
+      "distance_end_m": 4692.0,
+      "distance_exit_m": 4842.0,
+      "reference_apex_speed_kph": 164.5,
+      "heading_change_deg": 187.6,
+      "radius_m": 90.3,
+      "estimated_lateral_g": 5.29,
+      "distance_brake_m": null,
+      "reference_braking_zone_m": null,
+      "manual": true
+    }
+  ],
+  "corners": {
+    "1": {
+      "corner_number": 1,
+      "direction": "left",
+      "source_apex_m": [
+        632.0
+      ],
+      "curv_sign": 1,
+      "brake_type": "brake",
+      "shared_braking": false,
+      "distance_start_m": 556.0,
+      "distance_apex_m": 632.0,
+      "distance_end_m": 728.0,
+      "distance_exit_m": 696.0,
+      "reference_apex_speed_kph": 84.0,
+      "heading_change_deg": 153.6,
+      "radius_m": 26.9,
+      "estimated_lateral_g": 2.7,
+      "distance_brake_m": 534.0,
+      "reference_braking_zone_m": 112.0
+    },
+    "2": {
+      "corner_number": 2,
+      "direction": "right",
+      "source_apex_m": [
+        835.0
+      ],
+      "curv_sign": -1,
+      "brake_type": "flat",
+      "shared_braking": false,
+      "distance_start_m": 749.0,
+      "distance_apex_m": 835.0,
+      "distance_end_m": 1013.0,
+      "distance_exit_m": 928.0,
+      "reference_apex_speed_kph": 177.5,
+      "heading_change_deg": 85.6,
+      "radius_m": 114.8,
+      "estimated_lateral_g": 3.75,
+      "distance_brake_m": null,
+      "reference_braking_zone_m": null
+    },
+    "3": {
+      "corner_number": 3,
+      "direction": "left",
+      "source_apex_m": [
+        1136.0
+      ],
+      "curv_sign": 1,
+      "brake_type": "flat",
+      "shared_braking": false,
+      "distance_start_m": 1040.0,
+      "distance_apex_m": 1136.0,
+      "distance_end_m": 1174.0,
+      "distance_exit_m": 1174.0,
+      "reference_apex_speed_kph": 273.1,
+      "heading_change_deg": 31.6,
+      "radius_m": 131.7,
+      "estimated_lateral_g": 4.86,
+      "distance_brake_m": null,
+      "reference_braking_zone_m": null
+    },
+    "4": {
+      "corner_number": 4,
+      "direction": "right",
+      "source_apex_m": [
+        1246.0
+      ],
+      "curv_sign": -1,
+      "brake_type": "lift",
+      "shared_braking": false,
+      "distance_start_m": 1190.0,
+      "distance_apex_m": 1246.0,
+      "distance_end_m": 1276.0,
+      "distance_exit_m": 1280.0,
+      "reference_apex_speed_kph": 282.3,
+      "heading_change_deg": 29.8,
+      "radius_m": 107.9,
+      "estimated_lateral_g": 5.95,
+      "distance_brake_m": 1229.0,
+      "reference_braking_zone_m": null
+    },
+    "5": {
+      "corner_number": 5,
+      "direction": "left",
+      "source_apex_m": [
+        1310.0
+      ],
+      "curv_sign": 1,
+      "brake_type": "lift",
+      "shared_braking": false,
+      "distance_start_m": 1282.0,
+      "distance_apex_m": 1310.0,
+      "distance_end_m": 1366.0,
+      "distance_exit_m": 1374.0,
+      "reference_apex_speed_kph": 265.0,
+      "heading_change_deg": 44.8,
+      "radius_m": 77.9,
+      "estimated_lateral_g": 8.25,
+      "distance_brake_m": 1254.0,
+      "reference_braking_zone_m": null
+    },
+    "6": {
+      "corner_number": 6,
+      "direction": "right",
+      "source_apex_m": [
+        1534.0
+      ],
+      "curv_sign": -1,
+      "brake_type": "lift",
+      "shared_braking": false,
+      "distance_start_m": 1376.0,
+      "distance_apex_m": 1534.0,
+      "distance_end_m": 1604.0,
+      "distance_exit_m": 1554.0,
+      "reference_apex_speed_kph": 231.0,
+      "heading_change_deg": 100.9,
+      "radius_m": 88.0,
+      "estimated_lateral_g": 4.88,
+      "distance_brake_m": 1410.0,
+      "reference_braking_zone_m": null
+    },
+    "7": {
+      "corner_number": 7,
+      "direction": "left",
+      "source_apex_m": [
+        1670.0
+      ],
+      "curv_sign": 1,
+      "brake_type": "brake",
+      "shared_braking": false,
+      "distance_start_m": 1614.0,
+      "distance_apex_m": 1670.0,
+      "distance_end_m": 1760.0,
+      "distance_exit_m": 1728.0,
+      "reference_apex_speed_kph": 203.2,
+      "heading_change_deg": 75.8,
+      "radius_m": 61.0,
+      "estimated_lateral_g": 6.19,
+      "distance_brake_m": 1638.0,
+      "reference_braking_zone_m": 76.0
+    },
+    "8": {
+      "corner_number": 8,
+      "direction": "right",
+      "source_apex_m": [
+        1832.0
+      ],
+      "curv_sign": -1,
+      "brake_type": "brake",
+      "shared_braking": false,
+      "distance_start_m": 1772.0,
+      "distance_apex_m": 1832.0,
+      "distance_end_m": 1902.0,
+      "distance_exit_m": 1902.0,
+      "reference_apex_speed_kph": 143.2,
+      "heading_change_deg": 88.2,
+      "radius_m": 54.8,
+      "estimated_lateral_g": 3.59,
+      "distance_brake_m": 1788.0,
+      "reference_braking_zone_m": 88.0
+    },
+    "9": {
+      "corner_number": 9,
+      "direction": "left",
+      "source_apex_m": [
+        1938.0
+      ],
+      "curv_sign": 1,
+      "brake_type": "lift",
+      "shared_braking": true,
+      "distance_start_m": 1908.0,
+      "distance_apex_m": 1938.0,
+      "distance_end_m": 2024.0,
+      "distance_exit_m": 1938.0,
+      "reference_apex_speed_kph": 155.2,
+      "heading_change_deg": 52.6,
+      "radius_m": 63.1,
+      "estimated_lateral_g": 3.97,
+      "distance_brake_m": 1764.0,
+      "reference_braking_zone_m": null
+    },
+    "10": {
+      "corner_number": 10,
+      "direction": "left",
+      "source_apex_m": [
+        2152.0
+      ],
+      "curv_sign": 1,
+      "brake_type": "flat",
+      "shared_braking": false,
+      "distance_start_m": 2056.0,
+      "distance_apex_m": 2152.0,
+      "distance_end_m": 2221.0,
+      "distance_exit_m": 2221.0,
+      "reference_apex_speed_kph": 222.6,
+      "heading_change_deg": 35.6,
+      "radius_m": 141.7,
+      "estimated_lateral_g": 3.65,
+      "distance_brake_m": null,
+      "reference_braking_zone_m": null
+    },
+    "11": {
+      "corner_number": 11,
+      "direction": "left",
+      "source_apex_m": [
+        2528.0
+      ],
+      "curv_sign": 1,
+      "brake_type": "brake",
+      "shared_braking": false,
+      "distance_start_m": 2454.0,
+      "distance_apex_m": 2528.0,
+      "distance_end_m": 2622.0,
+      "distance_exit_m": 2580.0,
+      "reference_apex_speed_kph": 76.1,
+      "heading_change_deg": 149.9,
+      "radius_m": 27.0,
+      "estimated_lateral_g": 2.51,
+      "distance_brake_m": 2444.0,
+      "reference_braking_zone_m": 104.0
+    },
+    "12": {
+      "corner_number": 12,
+      "direction": "left",
+      "source_apex_m": [
+        3728.0
+      ],
+      "curv_sign": 1,
+      "brake_type": "brake",
+      "shared_braking": false,
+      "distance_start_m": 3656.0,
+      "distance_apex_m": 3728.0,
+      "distance_end_m": 3816.0,
+      "distance_exit_m": 3780.0,
+      "reference_apex_speed_kph": 91.2,
+      "heading_change_deg": 129.9,
+      "radius_m": 32.7,
+      "estimated_lateral_g": 2.37,
+      "distance_brake_m": 3620.0,
+      "reference_braking_zone_m": 128.0
+    },
+    "13": {
+      "corner_number": 13,
+      "direction": "right",
+      "source_apex_m": [
+        3962.0
+      ],
+      "curv_sign": -1,
+      "brake_type": "brake",
+      "shared_braking": false,
+      "distance_start_m": 3840.0,
+      "distance_apex_m": 3962.0,
+      "distance_end_m": 4088.0,
+      "distance_exit_m": 4024.0,
+      "reference_apex_speed_kph": 101.3,
+      "heading_change_deg": 196.4,
+      "radius_m": 37.2,
+      "estimated_lateral_g": 2.38,
+      "distance_brake_m": 3880.0,
+      "reference_braking_zone_m": 86.0
+    },
+    "14": {
+      "corner_number": 14,
+      "direction": "right",
+      "source_apex_m": [
+        4030.0
+      ],
+      "curv_sign": -1,
+      "brake_type": "brake",
+      "shared_braking": false,
+      "distance_start_m": 4030.0,
+      "distance_apex_m": 4030.0,
+      "distance_end_m": 4030.0,
+      "distance_exit_m": 4030.0,
+      "reference_apex_speed_kph": 101.3,
+      "heading_change_deg": 196.4,
+      "radius_m": 37.2,
+      "estimated_lateral_g": 2.38,
+      "distance_brake_m": 3880.0,
+      "reference_braking_zone_m": 86.0,
+      "manual": true
+    },
+    "15": {
+      "corner_number": 15,
+      "direction": "left",
+      "source_apex_m": [
+        4232.0
+      ],
+      "curv_sign": 1,
+      "brake_type": "brake",
+      "shared_braking": false,
+      "distance_start_m": 4098.0,
+      "distance_apex_m": 4232.0,
+      "distance_end_m": 4314.0,
+      "distance_exit_m": 4286.0,
+      "reference_apex_speed_kph": 88.3,
+      "heading_change_deg": 188.3,
+      "radius_m": 29.3,
+      "estimated_lateral_g": 2.2,
+      "distance_brake_m": 4134.0,
+      "reference_braking_zone_m": 106.0
+    },
+    "16": {
+      "corner_number": 16,
+      "direction": "right",
+      "source_apex_m": [
+        4438.0
+      ],
+      "curv_sign": -1,
+      "brake_type": "flat",
+      "shared_braking": false,
+      "distance_start_m": 4438.0,
+      "distance_apex_m": 4438.0,
+      "distance_end_m": 4438.0,
+      "distance_exit_m": 4842.0,
+      "reference_apex_speed_kph": 164.5,
+      "heading_change_deg": 187.6,
+      "radius_m": 90.3,
+      "estimated_lateral_g": 5.29,
+      "distance_brake_m": null,
+      "reference_braking_zone_m": null,
+      "manual": true
+    },
+    "17": {
+      "corner_number": 17,
+      "direction": "right",
+      "source_apex_m": [
+        4516.0
+      ],
+      "curv_sign": -1,
+      "brake_type": "flat",
+      "shared_braking": false,
+      "distance_start_m": 4344.0,
+      "distance_apex_m": 4516.0,
+      "distance_end_m": 4842.0,
+      "distance_exit_m": 4842.0,
+      "reference_apex_speed_kph": 164.5,
+      "heading_change_deg": 187.6,
+      "radius_m": 90.3,
+      "estimated_lateral_g": 5.29,
+      "distance_brake_m": null,
+      "reference_braking_zone_m": null
+    },
+    "18": {
+      "corner_number": 18,
+      "direction": "right",
+      "source_apex_m": [
+        4692.0
+      ],
+      "curv_sign": -1,
+      "brake_type": "flat",
+      "shared_braking": false,
+      "distance_start_m": 4692.0,
+      "distance_apex_m": 4692.0,
+      "distance_end_m": 4692.0,
+      "distance_exit_m": 4842.0,
+      "reference_apex_speed_kph": 164.5,
+      "heading_change_deg": 187.6,
+      "radius_m": 90.3,
+      "estimated_lateral_g": 5.29,
+      "distance_brake_m": null,
+      "reference_braking_zone_m": null,
+      "manual": true
+    },
+    "19": {
+      "corner_number": 19,
+      "direction": "left",
+      "source_apex_m": [
+        4988.0
+      ],
+      "curv_sign": 1,
+      "brake_type": "brake",
+      "shared_braking": false,
+      "distance_start_m": 4862.0,
+      "distance_apex_m": 4988.0,
+      "distance_end_m": 5060.0,
+      "distance_exit_m": 5008.0,
+      "reference_apex_speed_kph": 221.0,
+      "heading_change_deg": 84.8,
+      "radius_m": 75.5,
+      "estimated_lateral_g": 5.39,
+      "distance_brake_m": 4902.0,
+      "reference_braking_zone_m": 96.0
+    },
+    "20": {
+      "corner_number": 20,
+      "direction": "left",
+      "source_apex_m": [
+        5278.0
+      ],
+      "curv_sign": 1,
+      "brake_type": "brake",
+      "shared_braking": false,
+      "distance_start_m": 5194.0,
+      "distance_apex_m": 5278.0,
+      "distance_end_m": 5374.0,
+      "distance_exit_m": 5324.0,
+      "reference_apex_speed_kph": 106.1,
+      "heading_change_deg": 124.0,
+      "radius_m": 37.0,
+      "estimated_lateral_g": 2.71,
+      "distance_brake_m": 5208.0,
+      "reference_braking_zone_m": 92.0
+    }
+  }
+}
