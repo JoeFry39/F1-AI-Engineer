@@ -1,8 +1,10 @@
+from __future__ import annotations
+import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Optional, List, Dict, Tuple, Any
+from typing import Optional, List, Dict, Tuple, Any, Callable, Deque
 
 from telemetry.telemetry_state import(
     TelemetryState,
@@ -15,6 +17,11 @@ from telemetry.packet_parser import(
     TYRE_COMPOUNDS_VISUAL,
     ERS_DEPLOY_MODES,
 )
+
+logger = logging.getLogger(__name__)
+
+def _now() -> float:
+    return time.perf_counter()
 
 ## SECTION 1: Insight Types, Priorities, and Insight Dataclass
 
@@ -60,6 +67,7 @@ class InsightType(Enum):
     SAFETY_CAR_ENDING = auto()      ## Safety car ending
     RED_FLAG = auto()               ## Red flag
     YELLOW_FLAG = auto()            ## Yellow flag
+    PENALTY_ISSUED = auto()
     ## Damage/Reliability
     DAMAGE_WING = auto()            ## Wing damage detected
     DAMAGE_FLOOR = auto()           ## Floor damage detected
@@ -74,17 +82,21 @@ class InsightType(Enum):
     GAP_TO_LEADER = auto()          ## Gap to leader
     OVERTAKE_DETECTED = auto()      ## Overtake
     FASTEST_LAP = auto()            ## Fastest lap
+    RETIREMENT = auto()
+    RIVAL_STATUS = auto()
 
 @dataclass
 class Insight:
     insight_type: InsightType           ## What the insight type is
     priority: InsightPriority           ## Priority of insight
-    timestamp: float                    ## time.perf_counter() when generated
+    timestamp: float                    ## _now() when generated
     session_time: float                 ## session clock (seconds)
     data: Dict[str, Any]                ## payload - keys depend on insight_type
     message: str = ""                   ## pre-built plain-English summary
     lap_number: Optional[int] = None    ## lap this insight relates to
     vehicle_idx: Optional[int] = None   ## car this insight relates to (None = player)
+    corner_id: Optional[int] = None     ## set when the insight is about a specific corner
+    corner_name: Optional[str] = None
 
     def __repr__(self) -> str:
         return(
@@ -96,40 +108,59 @@ class Insight:
 
 ## SECTION 2: AnalyticsConfig
 
+FEEDBACK_MULTIPLIER = {"minimal": 2.0, "normal": 1.0, "detailed": 0.5}
+
 @dataclass
 class AnalyticsConfig:
+    feedback_level: str = "normal"          ## how chatty the system is
     ##Tyre Thresholds
-    tyre_wear_warning_pct: float = 50.0     ## % wear triggers WARNING
-    tyre_wear_critical_pct: float = 75.0    ## % wear triggers CRITICAL
-    tyre_temp_cold_surface: int = 75        ## below this = cold
-    tyre_temp_hot_surface: int = 115        ## above this = overheating
-    tyre_blister_warning: int = 20          ## blister % triggers WARNING
+    tyre_wear_warning_steps: Tuple[int, ...] = (50, 60, 70)     ## % wear triggers WARNING
+    tyre_wear_critical_steps: Tuple[int, ...] = (75, 85, 92)    ## % wear triggers CRITICAL
+    tyre_temp_cold_surface: int = 75                            ## below this = cold
+    tyre_temp_hot_surface: int = 115                            ## above this = overheating
+    tyre_temp_hysteresis: int = 10
+    tyre_blister_warning: int = 20                              ## blister % triggers WARNING
+    tyre_min_samples_for_rate: int = 4
     ## Fuel Thresholds
-    fuel_save_delta_laps: float = -1.5      ## fuel_remaining_laps - laps_left < this -> save
-    fuel_rich_delta_laps: float = 3.0       ## fuel surplus > this -> can go rich
-    fuel_critical_laps: float = 0.5         ## fuel_remaining_laps below this -> critical
+    fuel_save_delta_laps: float = -1.5                          ## fuel_remaining_laps - laps_left < this -> save
+    fuel_rich_delta_laps: float = 3.0                           ## fuel surplus > this -> can go rich
+    fuel_critical_laps: float = 0.5                             ## fuel_remaining_laps below this -> critical
+    fuel_worsen_steps_laps: float = 0.5                         ## repeat a fuel-save call early
     ## ERS Thresholds
-    ers_low_pct: float = 15.0               ## ERS store below this -> LOW warning
-    ers_harvest_drop_pct: float = 30.0      ## if harvesting 30% less than avg -> warn
+    ers_low_pct: float = 15.0                                   ## ERS store below this -> LOW warning
+    ers_rearm_pct: float = 30.0
+    ers_harvest_drop_pct: float = 30.0                          ## if harvesting 30% less than avg -> warn
     ## Braking Thresholds
-    brake_threshold: float = 0.75           ## brake input above this = braking event
-    braking_early_delta_m: float = 15.0     ## braking > 15m earlier than best -> warn
-    braking_late_delta_m: float = 10.0      ## braking > 10m later than best -> note
-    min_speed_for_braking: int = 120        ## km/h minimum to track a braking event
+    brake_threshold: float = 0.75                               ## brake input above this = braking event
+    brake_release_threshold: float = 0.30
+    braking_early_delta_m: float = 15.0                         ## braking > 15m earlier than best -> warn
+    braking_late_delta_m: float = 15.0                          ## braking > 15m later than best -> note
+    braking_match_window_m: float = 80.0
+    min_speed_for_braking: int = 120                            ## km/h minimum to track a braking event
+    braking_corner_min_laps: int = 3                            ## same corner coached once per N laps
+    braking_max_per_lap: int = 2                                ## at most this many corners per lap
     ## Strategy Thresholds
-    undercut_gap_threshold_s: float = 2.2   ## gap to car ahead to flag undercut
-    undercut_tyre_age_min: int = 8          ## rival must have at least this many tyre laps
-    pit_window_warning_laps: int = 3        ## laps before latest pit -> warn
-    ## Position Change
-    gap_report_interval_s: float = 60.0     ## report live gap every N seconds
+    undercut_gap_threshold_s: float = 2.2                       ## gap to car ahead to flag undercut
+    undercut_tyre_age_min: int = 8                              ## rival must have at least this many tyre laps
+    pit_window_warning_laps: int = 3                            ## laps before latest pit -> warn
     ## Cooldowns: how long before insight can fire again
-    cooldown_tyre_warning_s: float = 60.0
-    cooldown_fuel_s: float = 20.0
-    cooldown_ers_s: float = 15.0
-    cooldown_braking_s: float = 10.0
-    cooldown_strategy_s: float = 45
-    cooldown_damage_s: float = 20.0
-    cooldown_gap_s: float = 60.0
+    cooldown_tyre_critical_s: float = 120.0
+    cooldown_tyre_temp_s: float = 150.0
+    cooldown_tyre_rate_s: float = 300.0
+    cooldown_blister_s: float = 180.0
+    cooldown_fuel_s: float = 150.0
+    cooldown_fuel_critical_s: float = 60.0
+    cooldown_fuel_delta_s: float = 300.0
+    cooldown_ers_s: float = 90.0
+    cooldown_ers_harvest_s: float = 240.0
+    cooldown_braking_global_s: float = 45.0
+    cooldown_strategy_s: float = 150
+    cooldown_damage_s: float = 90.0
+    cooldown_gap_s: float = 150.0
+    cooldown_position_s: float = 20.0
+
+    def cd(self, base_s: float) -> float:
+        return base_s * FEEDBACK_MULTIPLIER.get(self.feedback_level, 1.0)
 
 ## SECTION 3: Base Analyser Class
 
@@ -138,17 +169,17 @@ class BaseAnalyser:
         self.state = state
         self.config = config
         ## Mpas InsightType -> wall-clock time of last fire
-        self._last_fired: Dict[InsightType, float] = {}
+        self._last_fired: Dict[Tuple[InsightType, str], float] = {}
 
     def analyse(self) -> List[Insight]:
         raise NotImplementedError
     
-    def _on_cooldown(self, insight_type: InsightType, cooldown_s: float) -> bool:
-        last = self._last_fired.get(insight_type, 0.0)
-        return (time.perf_counter() - last) < cooldown_s
+    def _on_cooldown(self, insight_type: InsightType, cooldown_s: float, key: str = "") -> bool:
+        last = self._last_fired.get((insight_type, key))
+        return last is not None and (_now() - last) < cooldown_s
     
-    def _mark_fired(self, insight_type: InsightType) -> None:
-        self._last_fired[insight_type] = time.perf_counter()
+    def _mark_fired(self, insight_type: InsightType, key: str = "") -> None:
+        self._last_fired[(insight_type, key)] = _now()
 
     def _make_insight(
             self,
@@ -158,18 +189,22 @@ class BaseAnalyser:
             message: str,
             lap_number: Optional[int] = None,
             vehicle_idx: Optional[int] = None,
+            corner_id: Optional[int] = None,
+            corner_name: Optional[str] = None,
     ) -> Insight:
         p = self.state.player
-        session_time = p.lap_data_ts or 0.0 if p else 0.0
+        session_time = (p.lap_data_ts or 0.0) if p else 0.0
         return Insight(
             insight_type = insight_type,
             priority = priority,
-            timestamp = time.perf_counter(),
+            timestamp = _now(),
             session_time = session_time,
             data = data,
             message = message,
-            lap_number = lap_number or (p.current_lap_num if p else None),
+            lap_number = lap_number if lap_number is not None else (p.current_lap_num if p else None),
             vehicle_idx = vehicle_idx,
+            corner_id = corner_id,
+            corner_name = corner_name,
         )
     
     @property
@@ -183,327 +218,277 @@ class BaseAnalyser:
 ## SECTION 4: LapAnalyser
 
 class LapAnalyser(BaseAnalyser):
+
+    RECORD_WAIT_S = 6.0
+
     def __init__(self, state: TelemetryState, config: AnalyticsConfig):
         super().__init__(state, config)
         self._last_known_lap: Optional[int] = None
         self._prev_best_ms: Optional[int] = None
+        self._pending: List[Tuple[int, float]] = []
+        self._lap_invalid: Dict[int, bool] = {}
 
     def analyse(self) -> List[Insight]:
         p = self.player
         if p is None or p.current_lap_num is None:
             return []
         
-        current_lap = p.current_lap_num
+        lap = p.current_lap_num
+        self._lap_invalid[lap] = bool(p.current_lap_invalid)
 
         ## Initialise on first call
         if self._last_known_lap is None:
-            self._last_known_lap = current_lap
+            self._last_known_lap = lap
             return []
         
         ## No new lap
-        if current_lap == self._last_known_lap:
-            return []
-        
-        ## Lap num incremented
-        completed_lap_num = self._last_known_lap
-        self._last_known_lap = current_lap
+        if lap != self._last_known_lap:
+            if lap > self._last_known_lap:
+                self._pending.append((self._last_known_lap, _now()))
+            self._last_known_lap = lap
 
-        return self._on_lap_completed(completed_lap_num, p)
-    
-    def _on_lap_completed(self, lap_num: int, p: CarState) -> List[Insight]:
-        insights = []
-        lap_time_ms = p.last_lap_time_ms or 0
-        if lap_time_ms == 0:
+        insights: List[Insight] = []
+        still_waiting = []
+        for lap_num, ended_at in self._pending:
+            rec = self.state.get_player_lap_record(lap_num)
+            if rec is None and (_now() - ended_at) < self.RECORD_WAIT_S:
+                still_waiting.append((lap_num, ended_at))
+                continue
+            insights += self._on_lap_completed(lap_num, rec, p)
+        self._pending = still_waiting
+        return insights
+            
+    def _on_lap_completed(self, lap_num: int, rec: Optional[LapRecord], p: CarState) -> List[Insight]:
+        lap_time_ms = rec.lap_time_ms if rec else (p.last_lap_time_ms or 0)
+        if lap_time_ms <= 0:
             return []
-        
-        lap_record = self.state.get_player_lap_record(lap_num)
-
-        ## Lap Completed Insight
-        insights.append(self._make_insight(
-            insight_type = InsightType.LAP_COMPLETED,
-            priority = InsightPriority.INFO,
+        valid = rec.lap_valid if rec else not bool(p.current_lap_invalid)
+        insights = [self._make_insight(
+            InsightType.LAP_COMPLETED,
+            InsightPriority.INFO,
             data = {
                 "lap_number": lap_num,
                 "lap_time_ms": lap_time_ms,
                 "lap_time_str": _ms_to_time_str(lap_time_ms),
-                "sector1_ms": lap_record.sector1_time_ms if lap_record else 0,
-                "sector2_ms": lap_record.sector2_time_ms if lap_record else 0,
-                "sector3_ms": lap_record.sector3_time_ms if lap_record else 0,
-                "lap_valid": not (p.current_lap_invalid or False),
+                "sector1_ms": rec.sector1_time_ms if rec else 0,
+                "sector2_ms": rec.sector2_time_ms if rec else 0,
+                "sector3_ms": rec.sector3_time_ms if rec else 0,
+                "lap_valid": valid,
+                "in_lap": bool(rec and rec.pit_stop_this_lap),
+                "out_lap": bool(rec and rec.is_out_lap),
             },
-            message = f"Lap {lap_num}: {_ms_to_time_str(lap_time_ms)}",
-            lap_number = lap_num,
-        ))
+            message = f"Lap {lap_num}: {_ms_to_time_str(lap_time_ms)}" + ("" if valid else " (lap invalid)"),
+            lap_number = lap_num)]
+        if not valid or rec is None or rec.pit_stop_this_lap or rec.is_out_lap:
+            return insights
 
         ## Personal Best Check
         best = self.state.get_best_lap_record()
         if best and best.lap_number == lap_num:
-            delta_ms = 0
-            prev_best = self._prev_best_ms
-            if prev_best:
-                delta_ms = lap_time_ms - prev_best
-
+            prev = self._prev_best_ms
+            delta = (lap_time_ms - prev) if prev else 0
             insights.append(self._make_insight(
-                insight_type = InsightType.PERSONAL_BEST,
-                priority = InsightPriority.INFO,
-                data = {
+                InsightType.PERSONAL_BEST,
+                InsightPriority.INFO,
+                data={
                     "lap_time_ms": lap_time_ms,
                     "lap_time_str": _ms_to_time_str(lap_time_ms),
-                    "delta_ms": delta_ms,
-                    "delta_str": _format_delta_ms(delta_ms),
+                    "delta_ms": delta,
+                    "delta_str": _format_delta_ms(delta),
                 },
-                message = f"Personal best! {_ms_to_time_str(lap_time_ms)} ({_format_delta_ms(delta_ms)})",
-                lap_number = lap_num,
+                message=f"Personal best! {_ms_to_time_str(lap_time_ms)}" + (f" ({_format_delta_ms(delta)})" if prev else ""),
+                lap_number=lap_num,
             ))
-        self._prev_best_ms = best.lap_time_ms if best else None
-
-        ## Sector Delta vs Personal Best
-        if lap_record and best and best.lap_number != lap_num:
-            for sector_num, (cur_ms, best_ms, label) in enumerate([
-                (lap_record.sector1_time_ms, best.sector1_time_ms, "S1"),
-                (lap_record.sector2_time_ms, best.sector2_time_ms, "S2"),
-                (lap_record.sector3_time_ms, best.sector3_time_ms, "S3"),
-            ], start = 1):
-                if cur_ms > 0 and best_ms > 0:
-                    delta = cur_ms - best_ms
-                    insights.append(self._make_insight(
-                        insight_type = InsightType.SECTOR_DELTA,
-                        priority = InsightPriority.INFO,
-                        data = {
-                            "sector": sector_num,
-                            "label": label,
-                            "current_ms": cur_ms,
-                            "best_ms": best_ms,
-                            "delta_ms": delta,
-                            "delta_str": _format_delta_ms(delta)
-                        },
-                        message = f"{label}: {_format_delta_ms(delta)} vs PB",
-                        lap_number = lap_num,
-                    ))
-            
-            ## Theoretical Best
-            theory_ms = self._compute_theoretical_best()
-            if theory_ms > 0:
-                delta_to_theory = lap_time_ms - theory_ms
-                if delta_to_theory > 200:
-                    insights.append(self._make_insight(
-                        insight_type = InsightType.THEORETICAL_BEST_BEST,
-                        priority = InsightPriority.INFO,
-                        data = {
-                            "theoretical_ms": theory_ms,
-                            "theoretical_str": _ms_to_time_str(theory_ms),
-                            "delta_ms": delta_to_theory,
-                            "delta_str": _format_delta_ms(delta_to_theory),
-                        },
-                        message = (
-                            f"Theoretical best: {_ms_to_time_str(theory_ms)} "
-                            f"({_format_delta_ms(delta_to_theory)} off this lap)"
-                        ),
-                        lap_number = lap_num,
-                    ))
-
-            return insights
+        elif best:
+            sectors = []
+            for n, cur, ref in((1, rec.sector1_time_ms, best.sector1_time_ms),
+                               (2, rec.sector2_time_ms, best.sector2_time_ms),
+                               (3, rec.sector3_time_ms, best.sector3_time_ms)):
+                if cur > 0 and ref > 0:
+                    sectors.append({"sector": n, "current_ms": cur, "best_ms": ref, "delta_ms": cur - ref, "delta_str": _format_delta_ms(cur - ref)})
+            if sectors:
+                worst = max(sectors, key=lambda s: s["delta_ms"])
+                insights.append(self._make_insight(
+                    InsightType.SECTOR_DELTA,
+                    InsightPriority.INFO,
+                    data = {
+                        "sectors": sectors,
+                        "worst_sector": worst["sector"],
+                        "vs_lap": best.lap_number,
+                    },
+                    message = (f"Lap {_format_delta_ms(lap_time_ms - best.lap_time_ms)} vs your best; "
+                               f"biggest loss in sector {worst['sector']} ({worst['delta_str']})."),
+                    lap_number=lap_num
+                ))
+            theory = self._compute_theoretical_best()
+            if theory and lap_time_ms - theory > 200:
+                insights.append(self._make_insight(
+                    InsightType.THEORETICAL_BEST,
+                    InsightPriority.INFO,
+                    data = {
+                        "theoretical_ms": theory,
+                        "theoretical_str": _ms_to_time_str(theory),
+                        "delta_ms": lap_time_ms - theory,
+                        "delta_str": _format_delta_ms(lap_time_ms - theory)
+                    },
+                    message = (f"Theoretical best {_ms_to_time_str(theory)}, "
+                               f"{_format_delta_ms(lap_time_ms - theory)} off this lap."),
+                    lap_number=lap_num,))
+        if best:
+            self._prev_best_ms = best.lap_time_ms
+        return insights
         
-        def _compute_theoretical_best(self) -> int:
-            history = self.sate.lap_history
-            if len(history) < 2:
-                return 0
-            
-            best_s1 = min((r.sector1_time_ms for r in history if r.sector1_time_ms > 0), default = 0)
-            best_s2 = min((r.sector2_time_ms for r in history if r.sector2_time_ms > 0), default = 0)
-            best_s3 = min((r.sector3_time_ms for r in history if r.sector3_time_ms > 0), default = 0)
-
-            if best_s1 == 0 or best_s2 == 0 or best_s3 == 0:
-                return 0
-            return best_s1 + best_s2 + best_s3
+    def _compute_theoretical_best(self) -> int:
+        clean = [r for r in self.state.lap_history if r.lap_valid and not r.pit_stop_this_lap and not r.is_out_lap]
+        if len(clean) < 2:
+            return 0
+        def best(attr: str, valid_attr: str) -> int:
+            return min((getattr(r, attr) for r in clean if getattr(r, attr) > 0 and getattr(r, valid_attr)), default=0)
+        s1, s2, s3 = (best("sector1_time_ms", "sector1_valid"), best("sector2_time_ms", "sector2_valid"), best("sector3_time_ms", "sector3_valid"))
+        return s1 + s2 + s3 if s1 and s2 and s3 else 0
         
 ## SECTION 5: Tyre Analyser
+
+TYRE_ORDER = ("RL", "RR", "FL", "FR")
+
+def _slope(xs: List[float], ys: List[float]) -> float:
+    n = len(xs)
+    if n < 2:
+        return 0.0
+    mx, my = sum(xs) / n, sum(ys) / n
+    den = sum((x - mx) ** 2 for x in xs)
+    return 0.0 if den == 0 else sum ((x - mx) * (y - my) for x, y in zip(xs, ys)) / den
 
 class TyreAnalyser(BaseAnalyser):
     def __init__(self, state: TelemetryState, config: AnalyticsConfig):
         super().__init__(state, config)
         self._wear_history: List[Tuple[int, float]] = []
-        self._last_sampled_lap: Optional[int] = None
-        self._cold_tyre_fired: bool = False
+        self._last_sampled_age: Optional[int] = None
+        self._last_comp: Optional[int] = None
+        self._last_age: Optional[int] = None
+        self._steps_fired: set = set()
+        self._cold_active = False
+        self._hot_active = False
+
+    @property
+    def wear_history(self) -> List[Tuple[int, float]]:
+        return list(self._wear_history)
+
+    def wear_rate(self) -> float:
+        if len(self._wear_history) < self.config.tyre_min_samples_for_rate:
+            return 0.0
+        pts = self._wear_history[-8:]
+        return max(0.0, _slope([a for a, _ in pts], [w for _, w in pts]))
+
+    def laps_to_wear(self, current_wear: float, target_pct: float) -> Optional[float]:
+        rate = self.wear_rate()
+        if rate <= 0:
+            p = self.player
+            age = (p.tyres_age_laps or 0) if p else 0
+            if age <= 0 or current_wear <= 0:
+                return None
+            rate = current_wear / age
+        return max(0.0, round((target_pct - current_wear) / rate, 1))
+
+    def reset_for_new_stint(self) -> None:
+        self._wear_history.clear()
+        self._last_sampled_age = None
+        self._steps_fired.clear()
+        self._cold_active = self._hot_active = False
+        self._last_fired.clear()
     
     def analyse(self) -> List[Insight]:
         p = self.player
-        if p is None or p.tyres_wear is None:
+        if p is None or not p.tyres_wear:
             return []
-        
-        insights = []
+        self._detect_new_stint(p)
+        insights: List[Insight] = []
         max_wear = max(p.tyres_wear)
-        current_lap = p.current_lap_num or 0
+        worst = TYRE_ORDER[p.tyres_wear.index(max_wear)] if len(p.tyres_wear) == 4 else None
+        age = p.tyres_age_laps or 0
 
-        if current_lap != self._last_sampled_lap and current_lap > 0:
-            self._wear_history.append((current_lap, max_wear))
-            self._last_sampled_lap = current_lap
-            if len(self._wear_history) > 20:
-                self._wear_history.pop(0)
+        if age != self._last_sampled_age and age > 0:
+            self._wear_history.append((age, max_wear))
+            self._last_sampled_age = age
+            del self._wear_history[:-20]
 
-        if max_wear >= self.config.tyre_wear_critical_pct:
-            if not self._on_cooldown(InsightType.TYRE_WEAR_CRITICAL,
-                                     self.config.cooldown_tyre_warning_s):
-                laps_est = self._estimate_laps_remaining(max_wear)
-                insights.append(self._make_insight(
-                    insight_type = InsightType.TYRE_WEAR_CRITICAL,
-                    priority = InsightPriority.CRITICAL,
-                    data = {
-                        "max_wear_pct": max_wear,
-                        "wear_all": p.tyres_wear,
-                        "laps_remaining": laps_est,
-                        "compound": p.visual_tyre_compound,
-                    },
-                    message = (
-                        f"Tyre wear critical: {max_wear:.0f}%. "
-                        f"Estimated {laps_est} laps remaining."
-                    ),
-                ))
-                self._mark_fired(InsightType.TYRE_WEAR_CRITICAL)
-        
-        elif max_wear >= self.config.tyre_wear_warning_pct:
-            if not self._on_cooldown(InsightType.TYRE_WEAR_WARNING,
-                                     self.config.cooldown_tyre_warning_s):
-                laps_est = self._estimate_laps_remaining(max_wear)
-                insights.append(self._make_insight(
-                    insight_type = InsightType.TYRE_WEAR_WARNING,
-                    priority = InsightPriority.WARNING,
-                    data = {
-                        "max_wear_pct": max_wear,
-                        "wear_all": p.tyres_wear,
-                        "laps_remaining": laps_est,
-                        "compound": p.visual_tyre_compound,
-                    },
-                    message = (
-                        f"Tyre wear at {max_wear:.0f}%. "
-                        f"Estimated {laps_est} laps left in this set."
-                    ),
-                ))
-                self._mark_fired(InsightType.TYRE_WEAR_WARNING)
+        common = {"max_wear_pct": round(max_wear, 1), "wear_all": p.tyres_wear, "worst_tyre": worst,
+                  "compound": TYRE_COMPOUNDS_VISUAL.get(p.visual_tyre_compound, p.visual_tyre_compound),
+                  "tyre_age_laps": age}
 
-            if len(self._wear_history) >= 5:
-                if not self._on_cooldown(InsightType.TYRE_DEGREDATION_RATE, 60.0):
-                    rate = self._compute_wear_rate()
-                    if rate > 0:
-                        laps_to_critical = (
-                            (self.config.tyre_wear_critical_pct - max_wear) / rate
-                            if rate > 0 else 99
-                        )
-                        insights.append(self._make_insight(
-                            insight_type = InsightType.TYRE_DEGREDATION_RATE,
-                            priority = InsightPriority.ADVISORY,
-                            data = {
-                                "wear_per_lap_pct": round(rate, 2),
-                                "laps_to_critical": round(laps_to_critical,1 ),
-                                "current_wear_pct": max_wear,
-                            },
-                            message = (
-                                f"Tyre degredation: {rate:.1f}% per lap. "
-                                f"~{laps_to_critical:.0f} laps to critical."
-                            ),
-                        ))
-                        self._mark_fired(InsightType.TYRE_DEGREDATION_RATE)
+        crit_step = max((s for s in self.config.tyre_wear_critical_steps if max_wear >= s), default=None)
+        warn_step = max((s for s in self.config.tyre_wear_warning_steps if max_wear >= s), default=None)
+        if crit_step is not None and ("c", crit_step) not in self._steps_fired:
+            self._steps_fired.add(("c", crit_step))
+            laps = self.laps_to_wear(max_wear, 100.0)
+            insights.append(self._make_insight(
+                InsightType.TYRE_WEAR_CRITICAL, InsightPriority.CRITICAL, {**common, "laps_remaining": laps},
+                f"Tyre wear critical at {max_wear:.0f}%." + (f" About {laps:.0f} laps left." if laps is not None else "")))
+        elif warn_step is not None and crit_step is None and ("w", warn_step) not in self._steps_fired:
+            self._steps_fired.add(("w", warn_step))
+            laps = self.laps_to_wear(max_wear, self.config.tyre_wear_critical_steps[0])
+            insights.append(self._make_insight(
+                InsightType.TYRE_WEAR_WARNING, InsightPriority.WARNING, {**common, "laps_to_critical": laps},
+                f"Tyre wear at {max_wear:.0f}%." + (f" About {laps:.0f} laps to the critical point." if laps is not None else "")))
 
-            insights += self._check_temperatures(p)
+        rate = self.wear_rate()
+        if rate > 0 and not self._on_cooldown(InsightType.TYRE_DEGREDATION_RATE, self.config.cd(self.config.cooldown_tyre_rate_s)):
+            to_crit = self.laps_to_wear(max_wear, self.config.tyre_wear_critical_steps[0])
+            insights.append(self._make_insight(
+                InsightType.TYRE_DEGREDATION_RATE, InsightPriority.INFO,
+                {**common, "wear_per_lap_pct": round(rate, 2), "laps_to_critical": to_crit, "samples": len(self._wear_history)},
+                f"Tyre wear is {rate:.1f}% per lap" + (f", about {to_crit:.0f} laps to the critical point." if laps is not None else "")))
+            self._mark_fired(InsightType.TYRE_DEGREDATION_RATE)
 
-            if p.tyre_blisters is not None:
-                max_blister = max(p.tyre_blisters)
-                if max_blister >= self.config.tyre_blister_warning:
-                    if not self._on_cooldown(InsightType.TYRE_BLISTER_WARNING,
-                                             self.config.cooldown_tyre_warning_s):
-                        insights.append(self._make_insight(
-                            insight_type = InsightType.TYRE_BLISTER_WARNING,
-                            priority = InsightPriority.WARNING,
-                            data = {
-                                "max_blister_pct": max_blister,
-                                "blisters_all": p.tyre_blisters,
-                            },
-                            message = f"Tyre blistering detected: {max_blister}%.",
-                        ))
-                        self._mark_fired(InsightType.TYRE_BLISTER_WARNING)
+        insights += self._check_temperatures(p, common)
+        insights += self._check_blisters(p, common)
+        return insights
 
-            return insights
-        
-        def _check_temperatures(self, p: CarState) -> List[Insight]:
-            insights = []
-            if p.tyres_surface_temp is None:
-                return []
-            avg_temp = sum(p.tyres_surface_temp) / 4
-            cold = self.config.tyre_temp_cold_surface
-            hot = self.config.tyre_tempt_hot_surface
-            if avg_temp < cold:
-                if not self._cold_tyre_fired:
-                    if not self._on_cooldown(InsightType.TYRE_TEMP_COLD, 60.0):
-                        insights.append(self._make_insight(
-                            insight_type = InsightType.TYRE_TEMP_COLD,
-                            priority = InsightPriority.ADVISORY,
-                            data = {
-                                "avg_temp_c": round(avg_temp, 1),
-                                "temps_all": p.tyres_surface_temp,
-                                "target_min_c": cold,
-                            },
-                            message = (
-                                f"Tyres cold: {avg_temp:.0f}°C"
-                                f"Target above {cold}°C"
-                                ),
-                        ))
-                        self._mark_fired(InsightType.TYRE_TEMP_COLD)
-                        self._cold_tyre_fired = True
-            elif avg_temp >= cold + 10:
-                self._cold_tyre_fired = False
+    def _detect_new_stint(self, p: CarState) -> None:
+        age, comp = p.tyres_age_laps, p.visual_tyre_compound
+        if self._last_age is not None and age is not None and (age < self._last_age or comp != self._last_comp):
+            self.reset_for_new_stint()
+        self._last_age, self._last_comp = age, comp
 
-            if avg_temp < hot:
-                            if not self._cold_tyre_fired:
-                                if not self._on_cooldown(InsightType.TYRE_TEMP_OVERHEATING, 30.0):
-                                    insights.append(self._make_insight(
-                                        insight_type = InsightType.TYRE_TEMP_OVERHEATING,
-                                        priority = InsightPriority.WARNING,
-                                        data = {
-                                            "avg_temp_c": round(avg_temp, 1),
-                                            "temps_all": p.tyres_surface_temp,
-                                            "target_max_c": hot,
-                                        },
-                                        message = (
-                                            f"Tyres overheating: {avg_temp:.0f}°C"
-                                            f"Ease up to protect the rubber"
-                                            ),
-                                    ))
-                                    self._mark_fired(InsightType.TYRE_TEMP_OVERHEATING)
-            return insights
+    def _check_temperatures(self, p: CarState, common: dict) -> List[Insight]:
+        temps = p.tyres_surface_temp
+        if not temps or not p.is_on_track or (p.speed_kph or 0) < 100:
+            return []
+        avg = sum(temps) / len(temps)
+        cfg, out = self.config, []
+        if avg < cfg.tyre_temp_cold_surface:
+            if not self._cold_active and not self._on_cooldown(InsightType.TYRE_TEMP_COLD, cfg.cd(cfg.cooldown_tyre_temp_s)):
+                self._cold_active = True
+                self._mark_fired(InsightType.TYRE_TEMP_COLD)
+                out.append(self._make_insight(
+                    InsightType.TYRE_TEMP_COLD, InsightPriority.ADVISORY,
+                    {**common, "avg_temp_c": round(avg, 1), "temps_all": temps, "target_min_c": cfg.tyre_temp_cold_surface},
+                    f"Tyres are cold at {avg:.0f} degrees. Build temperature before pushing."))
+        elif avg >= cfg.tyre_temp_cold_surface + cfg.tyre_temp_hysteresis:
+            self._cold_active = False
+        if avg >= cfg.tyre_temp_hot_surface:
+            if not self._hot_active and not self._on_cooldown(InsightType.TYRE_TEMP_OVERHEATING, cfg.cd(cfg.cooldown_tyre_temp_s)):
+                self._hot_active = True
+                self._mark_fired(InsightType.TYRE_TEMP_OVERHEATING)
+                out.append(self._make_insight(
+                    InsightType.TYRE_TEMP_OVERHEATING, InsightPriority.WARNING,
+                    {**common, "avg_temp_c": round(avg, 1), "temps_all": temps, "target_max_c": cfg.tyre_temp_hot_surface},
+                    f"Tyres overheating at {avg:.0f} degrees. Ease off to protect them"))
+        elif avg < cfg.tyre_temp_hot_surface - cfg.tyre_temp_hysteresis:
+            self._hot_active = False
+        return out
 
-        def _estimate_laps_remaining(self, current_wear: float) -> float:
-            rate = self._compute_wear_rate()
-            if rate <= 0:
-                p = self.player
-                age = p.tyres_age_laps if p and p.tyres_age_laps else 1
-                if age > 0 and current_wear > 0:
-                    rate = current_wear / age
-                else:
-                    return 99.0
-
-            remaining = (self.config.tyre_wear_critical_pct - current_wear) / rate
-            return max (0.0, round(remaining, 1))
-
-        def _compute_wear_rate(self) -> float:
-            if len(self._wear_history) < 3:
-                return 0.0
-            laps = [x[0] for x in self.wear_history]
-            wears = [x[1] for x in self.wear_history]
-            n = len(laps)
-            mean_lap = sum(laps)/n
-            mean_wear = sum(wears)/n
-            numerator = sum((1-mean_lap) * (w-mean_wear) for 1, w in zip(laps, wears))
-            denominator = sum((1-mean_lap) ** 2 for l in laps)
-            if denominator == 0:
-                return 0.0
-            slope = numerator/denominator
-            return max(0.0, slope)
-
-        def reset_for_new_stint(self) -> None:
-            self._wear_history.clear()
-            self._last_sampled_lap = None
-            self._cold_tyre_fired = False
-            self._last_fired.clear()
+    def _check_blisters(self, p: CarState, common: dict) -> List[Insight]:
+        if not p.tyre_blisters:
+            return []
+        worst = max(p.tyre_blisters)
+        if worst >= self.config.tyre_blister_warning and not self._on_cooldown(
+            InsightType.TYRE_BLISTER_WARNING, self.config.cd(self.config.cooldown_blister_s)):
+            self._mark_fired(InsightType.TYRE_BLISTER_WARNING)
+            return [self._make_insight(InsightType.TYRE_BLISTER_WARNING, InsightPriority.WARNING,
+                                       {**common, "max_blister_pct": worst, "blisters_all": p.tyre_blisters},
+                                       f"Tyre blistering at {worst}%.")]
+        return []
 
 ## SECTION 6: Fuel Analyser
 
@@ -511,117 +496,68 @@ class FuelAnalyser(BaseAnalyser):
     def __init__(self, state: TelemetryState, config: AnalyticsConfig):
         super().__init__(state, config)
         self._fuel_per_lap_history: List[float] = []
-        self._lap_lap_fuel: Optional[float] = None
+        self._fuel_at_lap_start: Optional[float] = None
         self._last_lap_num: Optional[int] = None
+        self._last_save_delta: Optional[float] = None
 
     def analyse(self) -> List[Insight]:
         p = self.player
-        if p is None:
+        if p is None or not self.session.is_race or not p.fuel_remaining_laps is None:
             return []
-        if not self.session.is_race:
-            return []
-        if p.fuel_remaining_laps is None or p.fuel_remaining_laps == 0:
-            return []
-        insights = []
-
         self._track_consumption(p)
-
         laps_left = self.state.laps_remaining()
         if laps_left is None:
             return []
+        cfg = self.config
         delta = p.fuel_remaining_laps - laps_left
+        data = {"fuel_remaining_laps": round(p.fuel_remaining_laps, 2), "laps_left": laps_left,
+                "delta_laps": round(delta, 2), "fuel_in_tank_kg": round(p.fuel_in_tank or 0, 2),
+                "kg_per_lap": round(self._avg_fuel_per_lap(), 2), "current_mix": p.fuel_mix}
 
-        if p.fuel_remaining_laps < self.config.fuel_critical_laps:
-            if not self._on_cooldown(InsightType.FUEL_CRITICAL, self.config.cooldown_fuel_s):
-                insights.append(self._make_insight(
-                    insight_type= InsightType.FUEL_CRITICAL,
-                    priority = InsightPriority.CRITICAL,
-                    data = {
-                        "fuel_remaining_laps": round(p.fuel_remaining_laps, 2),
-                        "laps_left": laps_left,
-                        "delta_laps": round(delta, 2),
-                        "fuel_in_tank_kg": round(p.fuel_in_tank or 0, 2),
-                    },
-                    message = (
-                        f"CRITICAL: Fuel for only {p.fuel_remaining_laps:.1f} laps. "
-                        f"{laps_left} laps remaining. Push to lean immediately"
-                    ),
-                ))
+        if p.fuel_remaining_laps < cfg.fuel_critical_laps:
+            if not self._on_cooldown(InsightType.FUEL_CRITICAL, cfg.cd(cfg.cooldown_fuel_critical_s)):
                 self._mark_fired(InsightType.FUEL_CRITICAL)
-
-        elif delta < self.config.fuel_save_delta_laps:
-                    if not self._on_cooldown(InsightType.FUEL_SAVE_REQUIRED, self.config.cooldown_fuel_s):
-                        laps_short = abs(delta)
-                        insights.append(self._make_insight(
-                            insight_type= InsightType.FUEL_SAVE_REQUIRED,
-                            priority = InsightPriority.WARNING,
-                            data = {
-                                "fuel_remaining_laps": round(p.fuel_remaining_laps, 2),
-                                "laps_left": laps_left,
-                                "delta_laps": round(delta, 2),
-                                "current_mix": p.fuel_mix,
-                            },
-                            message = (
-                                f"Fuel save required. Short by {laps_short:.1f} laps. "
-                                f"Switch to lean mix"
-                            ),
-                        ))
-                        self._mark_fired(InsightType.FUEL_SAVE_REQUIRED)
-
-        elif delta > self.config.fuel_save_delta_laps:
-                            if not self._on_cooldown(InsightType.FUEL_RICH_AVAILABLE, self.config.cooldown_fuel_s):
-                                insights.append(self._make_insight(
-                                    insight_type= InsightType.FUEL_RICH_AVAILABLE,
-                                    priority = InsightPriority.ADVISORY,
-                                    data = {
-                                        "fuel_remaining_laps": round(p.fuel_remaining_laps, 2),
-                                        "laps_left": laps_left,
-                                        "delta_laps": round(delta, 2),
-                                        "surplus_kg": round((delta * self._avg_fuel_per_lap()),  2),
-                                    },
-                                    message = (
-                                        f"Fuel surplus of {delta:.1f} laps. "
-                                        f"Switch to rich mix"
-                                    ),
-                                ))
-                                self._mark_fired(InsightType.FUEL_RICH_AVAILABLE)
-
+                return[self._make_insight(InsightType.FUEL_CRITICAL, InsightPriority.CRITICAL, data,
+                                          f"Fuel critical: {p.fuel_remaining_laps:.1f} laps in the tank, {laps_left} to go.")]
+        elif delta < cfg.fuel_save_delta_laps:
+            worse = self._last_save_delta is not None and delta < self._last_save_delta - cfg.fuel_worsen_steps_laps
+            if worse or not self._on_cooldown(InsightType.FUEL_SAVE_REQUIRED, cfg.cd(cfg.cooldown_fuel_s)):
+                    self._last_save_delta = delta
+                    self._mark_fired(InsightType.FUEL_SAVE_REQUIRED)
+                    return [self._make_insight(InsightType.FUEL_SAVE_REQUIRED, InsightPriority.WARNING, data,
+                            f"Fuel save required. Short by {abs(delta):.1f} laps. Switch to lean mix.")]
+        elif delta > cfg.fuel_rich_delta_laps:
+                    self._last_save_delta = None
+                    if not self._on_cooldown(InsightType.FUEL_RICH_AVAILABLE, cfg.cd(cfg.cooldown_fuel_delta_s)):
+                        self._mark_fired(InsightType.FUEL_RICH_AVAILABLE)
+                        return [self._make_insight(InsightType.FUEL_RICH_AVAILABLE, InsightPriority.ADVISORY,
+                            {**data, "surplus_kg": round(delta * self._avg_fuel_per_lap(), 2)},
+                            f"Fuel surplus of {delta:.1f} laps. Rich mix is available")]
         else:
-            if not self._on_cooldown(InsightType.FUEL_DELTA, 60.0):
-                sign = "+" if delta >= 0 else ""
-                insights.append(self._make_insight(
-                    insight_type= InsightType.FUEL_DELTA,
-                    priority = InsightPriority.INFO,
-                    data = {
-                        "fuel_remaining_laps": round(p.fuel_remaining_laps, 2),
-                        "laps_left": laps_left,
-                        "delta_laps": round(delta, 2),
-                    },
-                    message = f"Fuel delta: {sign}{delta:.1f} laps."
-                ))
+            self._last_save_delta = None
+            if not self._on_cooldown(InsightType.FUEL_DELTA, cfg.cd(cfg.cooldown_fuel_delta_s)):
                 self._mark_fired(InsightType.FUEL_DELTA)
-
-        return insights
+                return [self._make_insight(InsightType.FUEL_DELTA, InsightPriority.INFO, data,
+                                           f"Fuel is on target, {delta:+.1f} laps")]
+        return []
 
     def _track_consumption(self, p:CarState) -> None:
         lap = p.current_lap_num
         fuel = p.fuel_in_tank
         if lap is None or fuel is None:
             return
-        if self._last_lap_num is not None and lap != self._last_lap_num:
-            if self._lap_lap_fuel is not None and fuel < self._lap_lap_fuel:
-                consumed = self._lap_lap_fuel - fuel
-                self._fuel_per_lap_history.append(consumed)
-                if len(self._fuel_per_lap_history) > 15:
-                    self._fuel_per_lap_history.pop(0)
-
-        self._lap_lap_fuel = fuel
+        if self._last_lap_num is not None and lap > self._last_lap_num and self._fuel_at_lap_start is not None:
+            used = self._fuel_at_lap_start - fuel
+            if used > 0:
+                self._fuel_per_lap_history.append(used)
+                del self._fuel_per_lap_history[:-15]
+        if lap != self._last_lap_num:
+            self._fuel_at_lap_start = fuel
         self._last_lap_num = lap
 
     def _avg_fuel_per_lap(self) -> float:
-        if not self._fuel_per_lap_history:
-            return 1.8
-        return sum(self._fuel_per_lap_history) / len(self._fuel_per_lap_history)
+        h = self._fuel_per_lap_history
+        return sum(h) / len(h) if h else 0.0
 
 ## SECTION 7: ERS Analyser
 
@@ -631,333 +567,289 @@ class ERSAnalyser(BaseAnalyser):
         self._harvest_per_lap: List[float] = []
         self._deploy_per_lap: List[float] = []
         self._last_lap_num: Optional[int] = None
+        self._seen = {"harvest": 0.0, "deploy": 0.0}
+        self._low_active = False
+        self._harvest_checked_lap: Optional[int] = None
 
     def analyse(self) -> List[Insight]:
         p = self.player
         if p is None or p.ers_store_energy is None:
             return []
-
-        insights = []
-        store_pct = p.ers_store_percent or 0.0
+        cfg, out = self.config, []
         self._track_lap_ers(p)
-        if store_pct < self.config.ers_low_pct:
-            if not self._on_cooldown(InsightType.ERS_STORE_LOW, self.config.cooldown_ers_s):
-                insights.append(self._make_insight(
-                    insight_type = InsightType.ERS_STORE_LOW,
-                    priority = InsightPriority.ADVISORY,
-                    data = {
-                        "store_pct": round(store_pct, 1),
-                        "store_joules": round(p.ers_store_energy, 0),
-                        "deploy_mode": p.ers_mode_name,
-                    },
-                    message = (
-                        f"ERS store low {store_pct:.0f}%"
-                        f"Consider harvesting mode"
-                    ),
-                ))
+        if p.ers_store_percent is None:
+            return out
+        pct = p.ers_store_percent
+
+        if pct < cfg.ers_low_pct:
+            if not self._low_active and not self._on_cooldown(InsightType.ERS_STORE_LOW, cfg.cd(cfg.cooldown_ers_s)):
+                self._low_active = True
                 self._mark_fired(InsightType.ERS_STORE_LOW)
+                out.append(self._make_insight(
+                    InsightType.ERS_STORE_LOW, InsightPriority.ADVISORY,
+                    {"store_pct": round(pct, 1), "store_joules": round(p.ers_store_energy, 0), "deploy_mode": p.ers_mode_name},
+                    f"ERS store low at {pct:.0f}%. Considering harvesting."))
+        elif pct >= cfg.ers_rearm_pct:
+            self._low_active = False
 
-        if len(self._harvest_per_lap) >= 4:
-            avg_harvest = sum(self._harvest_per_lap) / len(self._harvest_per_lap)
-            last_harvest = self._harvest_per_lap[-1]
-            if avg_harvest > 0:
-                drop_pct = (avg_harvest - last_harvest) / avg_harvest * 100
-                if drop_pct > self.config.ers_harvest_drop_pct:
-                    if not self._on_cooldown(InsightType.ERS_HARVEST_LOW, self.config.cooldown_ers_s * 2):
-                        insights.append(self._make_insight(
-                            insight_type = InsightType.ERS_HARVEST_LOW,
-                            priority = InsightPriority.ADVISORY,
-                            data = {
-                                "last_harvest_kj": round(last_harvest/1000, 1),
-                                "avg_harvest_kj": round(avg_harvest/1000, 1),
-                                "drop_pct": round(drop_pct, 1),
-                            },
-                            message = (
-                                f"ERS harvest down {drop_pct:.0f}% vs average"
-                                f"Check braking zones for harvest opportunity"
-                            ),
-                        ))
-                        self._mark_fired(InsightType.ERS_HARVEST_LOW)
-
-        return insights
+        lap = p.current_lap_num
+        if len(self._harvest_per_lap) >= 4 and lap != self._harvest_checked_lap:
+            self._harvest_checked_lap = lap
+            avg = sum(self._harvest_per_lap[:-1]) / len(self._harvest_per_lap[:-1])
+            last = self._harvest_per_lap[-1]
+            drop = (avg - last) / avg * 100 if avg > 0 else 0
+            if drop > cfg.ers_harvest_drop_pct and not self._on_cooldown(
+                InsightType.ERS_HARVEST_LOW, cfg.cd(cfg.cooldown_ers_harvest_s)):
+                self._mark_fired(InsightType.ERS_HARVEST_LOW)
+                out.append(self._make_insight(
+                    InsightType.ERS_HARVEST_LOW, InsightPriority.ADVISORY,
+                    {"last_harvest_kj": round(last / 1000, 1), "avg_harvest_kj": round(avg / 1000, 1), "drop_pct": round(drop, 1)},
+                    f"ERS harvest was down {drop:.0f}% on your average last lap."))
+        return out
 
     def _track_lap_ers(self, p: CarState) -> None:
         lap = p.current_lap_num
-        if lap is None or lap == self._last_lap_num:
+        if lap is None:
             return
-        if p.ers_harvested_lap_mguk is not None:
-            total_harvest = (p.ers_harvested_lap_mguk or 0) + (p.ers_harvested_lap_mguh or 0)
-            self._harvest_per_lap.append(total_harvest)
-            if len(self._harvest_per_lap) > 20:
-                self._harvest_per_lap.pop(0)
-        if p.ers_deployed_lap is not None:
-            self._deploy_per_lap.append(p.ers_deployed_lap)
-            if len(self._deploy_per_lap) > 20:
-                self._deploy_per_lap.pop(0)
-
+        if self._last_lap_num is not None and lap > self._last_lap_num:
+            self._harvest_per_lap.append(self._seen["harvest"])
+            self._deploy_per_lap[:-20], self._deploy_per_lap[:-20]
+            del self._harvest_per_lap[:-20], self._deploy_per_lap[:-20]
         self._last_lap_num = lap
+        self._seen["harvest"] = (p.ers_harvested_lap_mguk or 0) + (p.ers_harvested_lap_mguh or 0)
+        self._seen["deploy"] = p.ers_deployed_lap or 0
 
 ## SECTION 8: Braking Analyser
 
+CornerLookup = Callable[[float], Optional[Tuple[int, str]]]
+
 class BrakingAnalyser(BaseAnalyser):
-    POSITION_BIN_M = 10.0
+    EVAL_WAIT_S = 6.0
 
-    def __init__(self, state: TelemetryState, config: AnalyticsConfig):
+    def __init__(self, state: TelemetryState, config: AnalyticsConfig, corner_lookup: Optional[CornerLookup] = None):
         super().__init__(state, config)
-        self._in_braking_event: bool = False
-        self._event_start_dist: float = 0.0
-        self._event_start_speed: int = 0
-        self._event_lap: int = 0
-
-        self._best_profile: Dict[int, Dict] = {}
-
-        self._current_lap_events: List[Dict] = []
+        self.corner_lookup = corner_lookup
+        self._cur: Optional[Dict[str, Any]] = None
+        self._events: List[Dict[str, Any]] = []
+        self._lap_events: Dict[int, List[Dict[str, Any]]] = {}
         self._last_lap_num: Optional[int] = None
+        self._pending_eval: List[Tuple[int, float]] = []
+        self._last_coached_lap: Dict[str, int] = {}
 
     def analyse(self) -> List[Insight]:
         p = self.player
-        if p is None or p.brake is None or p.lap_distance is None:
+        if p is None or p.brake is None or p.lap_distance is None or not p.is_on_track:
             return []
-        if not p.is_on_track:
-            return []
-        insights = []
-        current_lap = p.current_lap_num or 0
+        lap = p.current_lap_num or 0
+        if self._last_lap_num is not None and lap != self._last_lap_num:
+            self._close_event(p)
+            if lap > self._last_lap_num:
+                self._lap_events[self._last_lap_num] = self._events
+                self._pending_eval.append((self._last_lap_num, _now()))
+                best = self.state.get_best_lap_record()
+                keep = best.lap_number if best else None
+                for old in [k for k in self._lap_events if k < lap - 12 and k != keep]:
+                    del self._lap_events[old]
+            self._events = []
+        self._last_lap_num = lap
 
-        if self._last_lap_num is not None and current_lap != self._last_lap_num:
-            insights += self._evaluate_lap_braking(self._last_lap_num)
-            self._update_best_profile()
-            self._current_lap_events.clear()
+        cfg = self.config
+        speed = p.speed_kph or 0
+        if self._cur is None:
+            if p.brake > cfg.brake_threshold and speed > cfg.min_speed_for_braking and not p.is_pitting:
+                self._cur = {"dist_m": p.lap_distance, "entry_speed": speed, "min_speed": speed, "lap": lap}
+        else:
+            self._cur["min_speed"] = min(self._cur["min_speed"], speed)
+            if p.brake < cfg.brake_release_threshold:
+                self._close_event(p)
 
-        self._last_lap_num = current_lap
-
-        braking = (p.brake > self.config.brake_threshold and (p.speed_kph or 0) > self.config.min_speed_for_braking)
-
-        if braking and not self._in_braking_event:
-            self._in_braking_event = True
-            self._event_start_dist = p.lap_distance
-            self._event_start_speed = p.speed_kph or 0
-            self._event_lap = current_lap
-        elif not braking and self._in_braking_event:
-            self._in_braking_event = False
-            self._current_lap_events.append({
-                "dist_m": self._event_start_dist,
-                "speed_kph": self._event_start_speed,
-                "lap": self._event_lap,
-            })
-        return insights
-
-    def _evaluate_lap_braking(self, lap_num: int) -> List[Insight]:
-        insights = []
-        if not self._best_profile or not self._current_lap_events:
-            return []
-        for event in self._current_lap_events:
-            bin_key = self._dist_to_bin(event["dist_m"])
-            best = self._best_profile.get(bin.key)
-            if best is None or best["count"] < 3:
-                continue
-            delta_m = event["dist_m"] - best["best_dist_m"]
-            if delta_m < -self.confih.braking_early_delta_m:
-                if not self._on_cooldown(InsightType.BRAKING_POINT_EARLY,
-                                         self.config.cooldown_braking_s):
-                    insights.append(self._make_insight(
-                        insight_type = InsightType.BRAKING_POINT_EARLY,
-                        priority = InsightPriority.ADVISORY,
-                        data = {
-                            "position_m": round(event["dist_m"], 1),
-                            "best_dist_m": round(best["best_dist_m"], 1),
-                            "delta_m": round(delta_m, 1),
-                            "entry_speed": event["speed_kph"],
-                            "lap_number": lap_num,
-                        },
-                        message = (
-                            f"Braking {abs(delta_m):.0f}m early at "
-                            f"{event['dist_m']:0.f}m "
-                            f"({event['speed_kph']}kph entry). "
-                            f"Best is {best['best_dist_m']:.0f}m."
-                        ),
-                        lap_number = lap_num,
-                    ))
-                    self._mark_fired(InsightType.BRAKING_POINT_EARLY)
-        return insights
-
-    def _update_best_profile(self) -> None:
-        for event in self._current_lap_events:
-            bin_key = self._dist_to_bin(event["dist_m"])
-            existing = self._best_profile.get(bin_key)
-            if existing is None:
-                self._best_profile[bin_key] = {
-                    "best_dist_m": event["dist_m"],
-                    "best_speed": event["speed_kph"],
-                    "count": 1,
-                }
+        out: List[Insight] = []
+        waiting = []
+        for lap_num, ended in self._pending_eval:
+            if self.state.get_player_lap_record(lap_num) is None and _now() - ended < self.EVAL_WAIT_S:
+                waiting.append((lap_num, ended))
             else:
-                if event["dist_m"] > existing["best_dist_m"]:
-                    existing["best_dist_m"] = event["dist_m"]
-                    existing["best_speed"] = event["speed_kph"]
-                existing["count"] += 1
+                out += self._evaluate_lap(lap_num)
+        self._pending_eval = waiting
+        return out
 
-    def _dist_to_bin(self, dist_m: float) -> int:
-        return int(dist_m / self.POSITION_BIN_M)
+    def _close_event(self, p: CarState) -> None:
+        if self._cur is not None:
+            self._cur["end_dist_m"] = p.lap_distance
+            self._events.append(self._cur)
+            self._cur = None
 
-    def get_braking_profile(self) -> Dict:
-        return dict(self._best_profile)
+    def reference_events(self) -> Tuple[Optional[int], List[Dict[str, Any]]]:
+        best = self.state.get_best_lap_record()
+        if best and best.lap_number in self._lap_events:
+            return best.lap_number, self._lap_events[best.lap_number]
+        return None, []
+
+    def get_braking_profile(self) -> List[Dict[str, Any]]:
+        return list(self.reference_events()[1])
+
+    def _key_and_corner(self, dist_m: float) -> Tuple[str, Optional[int], Optional[str]]:
+        hit = self.corner_lookup(dist_m) if self.corner_lookup else None
+        if hit:
+            return f"c{hit[0]}", hit[0], hit[1]
+        return f"d{int(dist_m // 60)}", None, None
+
+    def _evaluate_lap(self, lap_num: int) -> List[Insight]:
+        cfg = self.config
+        rec = self.state.get_player_lap_record(lap_num)
+        ref_lap, ref_events = self.reference_events()
+        if rec is None or not rec.lap_valid or rec.pit_stop_this_lap or rec.is_out_lap:
+            return []
+        if ref_lap is None or ref_lap == lap_num or not ref_events:
+            return []
+        candidates = []
+        for e in self._lap_events.get(lap_num, []):
+            ref = min(ref_events, key=lambda r: abs(r["dist_m"] - e["dist_m"]))
+            if abs(ref["dist_m"] - e["dist_m"]) > cfg.braking_match_window_m:
+                continue
+            delta = e["dist_m"] - ref["dist_m"]
+            key, cid, cname = self._key_and_corner(ref["dist_m"])
+            candidates.append((delta, key, cid, cname, e, ref))
+
+        early = sorted((c for c in candidates if c[0] < -cfg.braking_early_delta_m), key=lambda c: c[0])
+        late = sorted((c for c in candidates if c[0] > cfg.braking_early_delta_m), key=lambda c: c[0], reverse=True)
+        out: List[Insight] = []
+        for delta, key, cid, cname, e, ref in (early + late):
+            if len([i for i in out]) >= cfg.braking_max_per_lap:
+                break
+            last = self._last_coached_lap.get(key)
+            if last is not None and lap_num - last < cfg.braking_corner_min_laps:
+                continue
+            self._last_coached_lap[key] = lap_num
+            is_early = delta < 0
+            where = cname or f"the braking zone at {ref['dist_m']:.0f} metres"
+            data = {"delta_m": round(delta, 1), "dist_m": round(e["dist_m"], 1), "ref_dist_m": round(ref["dist_m"], 1),
+                    "entry_speed_kph": e["entry_speed"], "ref_entry_speed_kph": ref["entry_speed"],
+                    "min_speed_kph": e["min_speed"], "ref_min_speed_kph": ref["min_speed"], "vs_lap": ref_lap,
+                    "position_m": round(ref["dist_m"], 1)}
+            out.append(self._make_insight(
+                InsightType.BRAKING_POINT_EARLY if is_early else InsightType.BRAKING_POINT_LATE,
+                InsightPriority.ADVISORY if is_early else InsightPriority.INFO, data,
+                f"You braked {abs(delta):.0f} metres {'earlier' if is_early else 'later'} than your best lap into {where}.",
+                lap_number=lap_num, corner_id=cid, corner_name=cname))
+            return out
 
 ## SECTION 9: Strategy Analyser
 
 class StrategyAnalyser(BaseAnalyser):
+    POSITION_CONFIRM_S = 2.0
 
     def __init__(self, state: TelemetryState, config: AnalyticsConfig):
         super().__init__(state, config)
         self._last_position: Optional[int] = None
-        self._last_gap_report_ts: float = 0.0
+        self._candidate: Optional[Tuple[int, float]] = None
         self._undercut_flagged: bool = False
+        self._pit_open_lap: Optional[int] = None
+        self._last_stops: int = 0
 
     def analyse(self) -> List[Insight]:
         p = self.player
-        if p is None:
+        if p is None or not self.session.is_race:
             return []
-        insights = []
-        if self.session.is_race:
-            insights += self._check_pit_window(p)
-            insights += self._check_undercut(p)
-            insights += self._check_position_change(p)
-            insights += self._check_gap_report(p)
-        return insights
+        return (self._check_pit_window(p) + self._check_undercut(p) + self._check_position_change(p) + self._check_gap_report(p))
+
+    def rival_ahead(self) -> Optional[CarState]:
+        p = self.player
+        return self.state.get_car_by_position(p.car_position - 1) if p and p.car_position and p.car_position > 1 else None
+
+    def rival_behind(self) -> Optional[CarState]:
+        p = self.player
+        return self.state.get_car_by_position(p.car_position + 1) if p and p.car_position else None
 
     def _check_pit_window(self, p: CarState) -> List[Insight]:
-        insights = []
         ideal = self.session.pit_stop_window_ideal_lap
         latest = self.session.pit_stop_window_latest_lap
         lap = p.current_lap_num
-        if ideal is None or latest is None or lap is None:
+        if not ideal or not latest or lap is None:
             return []
-        if (p.num_pit_stops or 0) >= 1 and self.session.total_laps and self.session.total_laps < 30:
+        stops = p.num_pit_stops or 0
+        if stops != self._last_stops:
+            self._last_stops = stops
+            self._pit_open_lap = None
+        if stops >= 1 and self.session.total_laps and self.session.total_laps < 30:
             return[]
-        if lap == ideal:
-            if not self._on_cooldown(InsightType.PIT_WINDOW_OPEN, self.config.cooldown_strategy_s):
-                insights.append(self._make_insight(
-                    insight_type = InsightType.PIT_WINDOW_OPEN,
-                    priority = InsightPriority.ADVISORY,
-                    data = {
-                        "ideal_lap": ideal,
-                        "latest_lap": latest,
-                        "current_lap": lap,
-                        "rejoin_pos": self.session.pit_stop_rejoin_position,
-                    },
-                    message = (
-                        f"Pit window open. Ideal this lap. "
-                        f"Latest lap {latest}. "
-                        f"Rejoin P{self.session.pit_stop_rejoin_position}."
-                    ),
-                ))
-                self._mark_fired(InsightType.PIT_WINDOW_OPEN)
-
-        laps_to_latest = (latest - lap) if latest and lap else None
-        if laps_to_latest is not None and 0 < laps_to_latest <= self.config.pit_window_warning_laps:
-            if not self._on_cooldown(InsightType.PIT_WINDOW_CLOSING, self.config.cooldown_strategy_s):
-                            insights.append(self._make_insight(
-                                insight_type = InsightType.PIT_WINDOW_CLOSING,
-                                priority = InsightPriority.WARNING,
-                                data = {
-                                    "latest_lap": latest,
-                                    "current_lap": lap,
-                                    "laps_to_latest": laps_to_latest,
-                                },
-                                message = (
-                                    f"Pit window closing. Must pit within "
-                                    f"{laps_to_latest} laps. Latest: lap {latest}."
-                                ),
-                            ))
-                            self._mark_fired(InsightType.PIT_WINDOW_CLOSING)
-        return insights
+        cfg, out = self.config, []
+        rejoin = self.session.pit_stop_rejoin_position
+        if ideal <= lap <= latest and self._pit_open_lap is None:
+            self._pit_open_lap = lap
+            out.append(self._make_insight(
+                InsightType.PIT_WINDOW_OPEN, InsightPriority.ADVISORY,
+                {"ideal_lap": ideal, "latest_lap": latest, "current_lap": lap, "rejoin_pos": rejoin},
+                f"Pit window is open. Ideal lap {ideal}, latest lap {latest}. Rejoin P{rejoin}."))
+        to_latest = latest - lap
+        if 0 < to_latest <= cfg.pit_window_warning_laps and not self._on_cooldown(
+            InsightType.PIT_WINDOW_CLOSING, cfg.cd(cfg.cooldown_strategy_s)):
+            self._mark_fired(InsightType.PIT_WINDOW_CLOSING)
+            out.append(self._make_insight(
+                InsightType.PIT_WINDOW_CLOSING, InsightPriority.WARNING,
+                {"latest_lap": latest, "current_lap": lap, "laps_to_latest": to_latest},
+                f"Pit window closing. Must stop within {to_latest} laps, latest lap {latest}."))
+        return out
 
     def _check_undercut(self, p: CarState) -> List[Insight]:
-        insights = []
-        gap_s = self.state.player_gap_to_car_ahead()
-        if gap_s is None:
+        cfg = self.config
+        gap, rival = self.state.player_gap_to_car_ahead(), self.rival_ahead()
+        if gap is None or rival is None or p.is_pitting:
             return []
-        if gap_s > self.config.undercut_gap_threshold_s:
+        if gap > cfg.undercut_gap_threshold_s * 1.5:
             self._undercut_flagged = False
-            return []
-        if p.car_position is None or p.car_position <= 1:
-            return []
-        car_ahead = self.state.get_car_by_position(p.car_position - 1)
-        if car_ahead is None:
-            return []
-        their_tyre_age = car_ahead.tyres_age_laps or 0
-        if their_tyre_age < self.config.undercut_tyre_age_min:
-            return []
-        if not self._undercut_flagged:
-            if not self._on_cooldown(InsightType.UNDERCUT_WINDOW, self.config.cooldown_strategy_s):
-                insights.append(self._make_insight(
-                    insight_type = InsightType.UNDERCUT_WINDOW,
-                    priority = InsightPriority.ADVISORY,
-                    data = {
-                        "gap_s": round(gap_s, 3),
-                        "car_ahead_idx": car_ahead.vehicle_index,
-                        "car_ahead_name": car_ahead.name or "?",
-                        "their_tyre_age": their_tyre_age,
-                        "their_compound": car_ahead.visual_tyre_compound,
-                        "our_tyre_age": p.tyres_age_laps or 0,
-                    },
-                    message = (
-                        f"Undercut window: {gap_s:.2f}s to {car_ahead.name or 'car ahead'}. "
-                        f"They are on {car_ahead.visual_tyre_compound} "
-                        f"aged {their_tyre_age} laps."
-                    ),
-                ))
-                self._mark_fired(InsightType.UNDERCUT_WINDOW)
-                self._undercut_flagged = True
-        return insights
+        if (not self._undercut_flagged and gap < cfg.undercut_gap_threshold_s
+            and (rival.tyres_age_laps or 0) >= cfg.undercut_tyre_age_min
+            and not self._on_cooldown(InsightType.UNDERCUT_WINDOW, cfg.cd(cfg.cooldown_strategy_s))):
+            self._undercut_flagged = True
+            self._mark_fired(InsightType.UNDERCUT_WINDOW)
+            return [self._make_insight(
+                InsightType.UNDERCUT_WINDOW, InsightPriority.ADVISORY,
+                {"gap_ahead_s": round(gap, 2), "rival_name": rival.name, "rival_tyre_age": rival.tyres_age_laps,
+                 "rival_compound": TYRE_COMPOUNDS_VISUAL.get(rival.visual_tyre_compound, rival.visual_tyre_compound),
+                 "player_tyre_age": p.tyres_age_laps, "rejoin_pos": self.session.pit_stop_rejoin_position},
+                 f"Undercut chance: {rival.name or 'the car ahead'} is {gap:.1f} ahead on {rival.tyres_age_laps}-lap-old tyres.",
+                 vehicle_idx=rival.vehicle_index)]
+        return []
 
     def _check_position_change(self, p: CarState) -> List[Insight]:
-        insights = []
-        current_pos = p.car_position
+        pos = p.car_position
+        if pos is None:
+            return []
         if self._last_position is None:
-            self._last_position = current_pos
+            self._last_position = pos
             return []
-        if current_pos is None or current_pos == self._last_position:
+        if p.is_pitting:
+            self._last_position = pos
+            self._candidate = None
             return []
-        gained = current_pos < self._last_position
-        insights.append(self._make_insight(
-            insight_type = InsightType.POSITION_GAINED if gained else InsightType.POSITION_LOST,
-            priority = InsightPriority.INFO,
-            data = {
-                "new_position": current_pos,
-                "old_position": self._last_position,
-                "delta": self._last_position - current_pos,
-            },
-            message = (
-                f"Up to P{current_pos}." if gained
-                else f"Down to P{current_pos}."
-            ),
-        ))
-        self._last_position = current_pos
-        return insights
+        if pos == self._last_position:
+            self._candidate = None
+            return []
+        if self._candidate is None or self._candidate[0] != pos:
+            self._candidate = (pos, _now())
+            return []
+        if _now() - self._candidate[1] < self.POSITION_CONFIRM_S:
+            return []    
+        gained, old = pos < self._last_position, self._last_position
+        self._last_position, self._candidate = pos, None
+        return [self._make_insight(
+            InsightType.POSITION_GAINED if gained else InsightType.POSITION_LOST, InsightPriority.INFO,
+            {"new_position": pos, "old_position": old, "delta": old - pos},
+            f"Up to P{pos}." if gained else f"Down to P{pos}.")]
 
     def _check_gap_report(self, p: CarState) -> List[Insight]:
-        insights = []
-        now = time.perf_counter()
-        if now - self._last_gap_report_ts < self.config.gap_report_interval_s:
+        cfg = self.config
+        if self.session.safety_car_deployed or self._on_cooldown(InsightType.GAP_TO_AHEAD, cfg.cd(cfg.cooldown_gap_s)):
             return []
-        gap_ahead = self.state.player_gap_to_car_ahead()
-        gap_leader = self.state.player_gap_to_leader()
-        if gap_ahead is not None:
-            self._last_gap_report_ts = now
-            insights.append(self._make_insight(
-                insight_type = InsightType.GAP_TO_AHEAD,
-                priority = InsightPriority.INFO,
-                data = {
-                    "gap_ahead_s": round(gap_ahead, 3),
-                    "gap_leader_s": round(gap_leader, 3) if gap_leader else None,
-                    "position": p.car_position,
-                },
-                message = (
-                    f"Gap to car ahead: {gap_ahead:.2f}s."
-                    + (f" Leader: {gap_leader:.2f}s." if gap_leader is not None else "")
-                ),
-            ))
-        return insights
+        ahead, leader = self.state.player_gap_to_car_ahead(), self.state.player_gap_to_leader()
+        if ahead is None:
+            return []
+        self._mark_fired(InsightType.GAP_TO_AHEAD)
+        return [self._make_insight(
+            InsightType.GAP_TO_AHEAD, InsightPriority.INFO,
+            {"gap_ahead_s": round(ahead, 3), "gap_leader_s": round(leader, 3) if leader else None, "position": p.car_position},
+            f"Gap to car ahead: {ahead:.1f}s." + (f" Leader: {leader:.1f}s." if leader is not None else ""))]
 
 ## SECTION 10: Damage Analyser
 
@@ -965,12 +857,7 @@ class DamageAnalyser(BaseAnalyser):
 
     def __init__(self, state: TelemetryState, config: AnalyticsConfig):
         super().__init__(state, config)
-        self._last_fl_wing: int = 0
-        self._last_fr_wing: int = 0
-        self._last_rear_wing: int = 0
-        self._last_floor: int = 0
-        self._last_engine: int = 0
-        self._last_gearbox: int = 0
+        self._last = {"wing": 0, "floor": 0, "engine": 0, "gearbox": 0}
         self._engine_blown_alerted: bool = False
         self._drs_fault_alerted: bool = False
 
@@ -978,222 +865,200 @@ class DamageAnalyser(BaseAnalyser):
         p = self.player
         if p is None:
             return []
-        insights = []
+        cfg, out = self.config, []
         if p.engine_blown and not self._engine_blown_alerted:
-            insights.append(self._make_insight(
-                insight_type = InsightType.ENGINE_BLOWN,
-                priority = InsightPriority.CRITICAL,
-                data = {"engine_blown": True},
-                message = "ENGINE FAILURE. Car is done.",
-            ))
             self._engine_blown_alerted = True
+            out.append(self._make_insight(InsightType.ENGINE_BLOWN, InsightPriority.CRITICAL,
+            {"engine_blown": True}, "Engine failure."))
         if p.drs_fault and not self._drs_fault_alerted:
-            insights.append(self._make_insight(
-                insight_type = InsightType.DRS_FAULT,
-                priority = InsightPriority.WARNING,
-                data = {"drs_fault": True},
-                message = "DRS fault detected."
-            ))
             self._drs_fault_alerted = True
+            out.append(self._make_insight(InsightType.DRS_FAULT, InsightPriority.WARNING,
+                {"drs_fault": True}, "DRS fault detected."))
         elif not p.drs_fault:
             self._drs_fault_alerted = False
 
-        fl = p.front_left_wing_damage or 0
-        fr = p.front_right_wing_damage or 0
-        rear = p.rear_wing_damage or 0
-        if fl > self._last_fl_wing + 5 or fr > self._last_fr_wing + 5:
-            if not self._on_cooldown(InsightType.DAMAGE_WING, self.config.cooldown_damage_s):
-                avg_front = (fl + fr)/2
-                insights.append(self._make_insight(
-                    insight_type = InsightType.DAMAGE_WING,
-                    priority = InsightPriority.WARNING if avg_front > 30 else InsightPriority.INFO,
-                    data = {
-                        "front_left_pct": fl,
-                        "front_right_pct": fr,
-                        "rear_pct": rear,
-                    },
-                ))
-                self._mark_fired(InsightType.DAMAGE_WING)
-        self._last_fl_wing = fl
-        self._last_fr_wing = fr
-        self._last_rear_wing = rear
+        fl, fr, rear = (p.front_left_wing_damage or 0), (p.front_right_wing_damage or 0), (p.rear_wing_damage or 0)
+        wing = max(fl, fr, rear)
+        floor = max(p.floor_damage or 0, p.diffuser_damage or 0)
+        out += self._step(InsightType.DAMAGE_WING, "wing", wing, 5, 30,
+                          {"front_left_pct": fl, "front_right_pct": fr, "rear_pct": rear},
+                          lambda v: f"Wing damage: front left {fl}%, front right {fr}%, rear {rear}%.")
+        out += self._step(InsightType.DAMAGE_FLOOR, "floor", floor, 5, 25, {"floor_damage_pct": floor},
+                          lambda v: f"Floor damage at {v}%.")
+        out += self._step(InsightType.DAMAGE_ENGINE, "engine", p.engine_damage or 0, 10, 50,
+                          {"engine_damage_pct": p.engine_damage or 0}, lambda v: f"Engine damage at {v}%.")
+        out += self._step(InsightType.DAMAGE_GEARBOX, "gearbox", p.gear_box_damage or 0, 10, 50,
+                          {"gearbox_damage_pct": p.gear_box_damage or 0}, lambda v: f"Gearbox damage at {v}%.")
+        return out
 
-        eng = p.engine_damage or 0
-        if eng > self._last_engine + 10:
-            if not self._on_cooldown(InsightType.DAMAGE_ENGINE, self.config.cooldown_damage_s):
-                insights.append(self._make_insight(
-                    insight_type = InsightType.DAMAGE_ENGINE,
-                    priority = InsightPriority.WARNING if eng > 50 else InsightPriority.INFO,
-                    data = {"engine_damage_pct": eng},
-                    message = f"Engine damage: {eng}%."
-                ))
-                self._mark_fired(InsightType.DAMAGE_ENGINE)
-        self._last_engine = eng
-
-        gb = p.gear_box_damage or 0
-        if gb > self._last_gearbox + 10:
-            if not self._on_cooldown(InsightType.DAMAGE_GEARBOX, self.config.cooldown_damage_s):
-                insights.append(self._make_insight(
-                    insight_type = InsightType.DAMAGE_GEARBOX,
-                    priority = InsightPriority.WARNING if gb > 50 else InsightPriority.INFO,
-                    data = {"gearbox_damage_pct": gb},
-                    message = f"Gearbox damage: {gb}%."
-                ))
-                self._mark_fired(InsightType.DAMAGE_ENGINE)
-        self._last_gearbox = gb
-
-        return insights
+    def _step(self, itype: InsightType, name: str, value: int, jump: int, warn_at: int,
+    data: dict, msg: callable[[int], str]) -> List[Insight]:
+        last = self._last[name]
+        if value < last:
+            self._last[name] = value
+            return []
+        if value > last + jump and not self._on_cooldown(itype, self.config.cd(self.config.cooldown_damage_s)):
+            self._last[name] = value
+            self._mark_fired(itype)
+            return [self._make_insight(itype, InsightPriority.WARNING if value > warn_at else InsightPriority.INFO, data, msg(value))]
+        return []
 
 ## SECTION 11: Event Analyser
+
+PENALTY_TYPES = {0: "drive-through", 1: "stop-go", 2: "grid penalty", 4: "time penalty", 5: "warning", 6: "disqualification", 10: "lap deleted"}
+INFRINGEMENTS = {0: "blocking", 3: "a big collision", 4: "a collision", 10: "corner cutting", 13: "crossing the pit exit line", 14: "ignoring blue flags", 15: "ignoring yellow flags", 20: "pit lane speeding", 28: "track limits"}
 
 class EventAnalyser(BaseAnalyser):
 
     def __init__(self, state: TelemetryState, config: AnalyticsConfig):
         super().__init__(state, config)
-        self._processed_event_times: deque = deque(maxlen=100)
+        self._seen: Deque[Tuple[float, str, str]] = deque(maxlen=200)
 
     def analyse(self) -> List[Insight]:
-        insights = []
-        player_idx = self.state.player_index
-        for event in self.state.events:
-            if event.wall_time in self._processed_event_times:
+        out = []
+        pidx = self.state.player_index
+        for ev in list(self.state.events):
+            key = (ev.wall_time, ev.event_code, repr(ev.details))
+            if key in self._seen:
                 continue
-            self._processed_event_times.append(event.wall_time)
-            code = event.event_code
+            self._seen.append(key)
+            handler = {"SCAR": self._safety_car, "RDFL": self._red_flag, "FTLP": self._fastest_lap,
+                       "OVTK": self._overtake, "PENA": self._penalty, "RTMT": self._retirement}.get(ev.event_code)
+            ins = handler(ev, pidx) if handler else None
+            if ins:
+                out.append(ins)
+        return out
 
-            if code == "SCAR":
-                insight = self._handle_safety_car(event)
-            elif code == "RDFL":
-                insight = self._handle_red_flag(event)
-            elif code == "FTLP":
-                insight = self._handle_fastest_lap(event, player_idx)
-            elif code == "OVTK":
-                insight = self._handle_overtake(event, player_idx)
-            else:
-                insight = None
-            if insight:
-                insights.append(insight)
-        return insights
+    def _name(self, idx: Optional[int]) -> str:
+        c = self.state.cars[idx] if idx is not None and 0 <= idx < len(self.state.cars) else None
+        return (c.name if c and c.name else "a rival")
 
-    def _handle_safety_car(self, event) -> Optional[Insight]:
-        details = event.details
-        sc_type_map = {0: "No Safety Car", 1: "Safety Car", 2: "Virtual Safety Car", 3: "Formation Lap"}
-        event_type_map = {0: "deployed", 1: "returning", 2: "returned", 3: "resume race"}
-        sc_name = sc_type_map.get(getattr(details, "safety_car_type", 0), "Safety Car")
-        ev_name = event_type_map.get(getattr(details, "event_type", 0), "deployed")
-
-        if ev_name in ("deployed",):
-            return self._make_insight(
-                insight_type = InsightType.SAFETY_CAR_DEPLOYED,
-                priority = InsightPriority.WARNING,
-                data = {"event_type": ev_name},
-                message = f"{sc_name} {ev_name}. Prepare for restart.",
-            )
+    def _safety_car(self, ev, pidx):
+        d = ev.details
+        kind = {1: "Safety Car", 2: "Virtual Safety Car", 3: "Formation Lap"}.get(getattr(d, "safety_car_type", 0), "Safety car")
+        etype = getattr(d, "event_type", 0)
+        if etype == 0:
+            return self._make_insight(InsightType.SAFETY_CAR_DEPLOYED, InsightPriority.WARNING,
+                                      {"kind": kind, "event_type": "deployed"}, f"{kind} deployed.")
+        if etype in (1, 3):
+            return self._make_insight(InsightType.SAFETY_CAR_ENDING, InsightPriority.WARNING,
+                                      {"kind": kind, "event_type": "returning" if etype == 1 else "resume"},
+                                      f"{kind} in this lap. Prepare for the restart." if etype == 1 else "Race resumes")
         return None
+    
+    def _red_flag(self, ev, pidx):
+        return self._make_insight(InsightType.RED_FLAG, InsightPriority.CRITICAL, {}, "Red flag. Session suspended.")
 
-    def _handle_red_flag(self, event) -> Optional[Insight]:
-        return self._make_insight(
-            insight_type = InsightType.RED_FLAG,
-            priority = InsightPriority.CRITICAL,
-            data = {},
-            message = "Red flag. Session suspended.",
-        )
+    def _fastest_lap(self, ev, pidx):
+        d = ev.details
+        if d is None or getattr(d, "vehicle_idx", -1) != pidx:
+            return None
+        secs = float(getattr(d, "lap_time_ms", 0))
+        txt = _ms_to_time_str(int(round(secs * 1000)))
+        return self._make_insight(InsightType.FASTEST_LAP, InsightPriority.INFO,
+                                  {"lap_time_s": secs, "lap_time_str": txt}, f"Fastest lap of the race: {txt}.")
 
-    def _handle_fastest_lap(self, event, player_idx: int) -> Optional[Insight]:
-        details = event.details
-        if details is None:
+    def _overtake(self, ev, pidx): 
+        d = ev.details
+        if d is None:
             return None
-        is_player = (getattr(details, "vehicle_idx", -1) == player_idx)
-        if not is_player:
+        a, b = getattr(d, "overtaking_vehicle_idx", None), getattr(d, "being_overtaken_vehicle_idx", None)
+        if pidx not in (a, b):
             return None
-        lap_time = getattr(details, "lap_time", 0)
+        passed_by_me = a == pidx
+        other = b if passed_by_me else a
         return self._make_insight(
-            insight_type = InsightType.FASTEST_LAP,
-            priority = InsightPriority.INFO,
-            data = {
-                "lap_time_s": lap_time,
-                "lap_time_str": _ms_to_time_str(int(lap_time * 1000)),
-            },
-            message = f"Fastest lap of the race: {_ms_to_time_str(int(lap_time*1000))}.",
-        )
+            InsightType.OVERTAKE_DETECTED, InsightPriority.INFO,
+            {"player_passed": passed_by_me, "rival_name": self._name(other), "rival_idx": other},
+            f"You passed {self._name(other)}." if passed_by_me else f"{self._name(other)} passed you.",
+            vehicle_idx=other)
 
-    def _handle_overtake(self, event, player_idx: int) -> Optional[Insight]: 
-        details = event.details
-        if details is None:
+    def _penalty(self, ev, pidx):
+        d = ev.details
+        if d is None or getattr(d, "vehicle_idx", -1) != pidx:
             return None
-        return self._make_insight(
-            insight_type = InsightType.OVERTAKE_DETECTED,
-            priority = InsightPriority.INFO,
-            data = {
-                "overtaking_idx": getattr(details, "overtaking_vehicle_idx", None),
-                "being_overtaken_idx": getattr(details, "being_overtaken_vehicle_idx", None),
-            },
-            message = "Overtake confirmed."
-        )
+        ptype = PENALTY_TYPES.get(d.penalty_type, f"penalty type {d.penalty_type}")
+        why = INFRINGEMENTS.get(d.infringement_type, f"infringement {d.infringement_type}")
+        secs = f" of {d.time} seconds" if d.penalty_type == 4 and d.time else ""
+        return self._make_insight(InsightType.PENALTY_ISSUED, InsightPriority.WARNING,
+                                  {"penalty_type": ptype, "infringement": why, "seconds": d.time, "lap": d.lap_num},
+                                  f"You have a {ptype}{secs} for {why}.")
+
+    def _retirement(self, ev, pidx):
+        d = ev.details
+        idx = getattr(d, "vehicle_idx", None)
+        if d is None or idx == pidx:
+            return None
+        return self._make_insight(InsightType.RETIREMENT, InsightPriority.INFO,
+                                  {"rival_name": self._name(idx), "rival_idx": idx},
+                                  f"{self._name(idx)} has retired", vehicle_idx=idx)
 
 ## Section 12: Analytics Engine
 
 class AnalyticsEngine:
 
-    INSIGHT_HISTORY_SIZE = 200
+    MAX_HISTORY = 300
 
-    def __init__(self, state: TelemetryState, config: Optional[AnalyticsConfig] = None):
+    def __init__(self, state: TelemetryState, config: Optional[AnalyticsConfig] = None,
+                 corner_lookup: Optional[CornerLookup] = None, require_live: bool = True):
         self.state = state
         self.config = config or AnalyticsConfig()
-        self._analysers: List[BaseAnalyser] = [
-            LapAnalyser(state, self.config),
-            TyreAnalyser(state, self.config),
-            FuelAnalyser(state, self.config),
-            ERSAnalyser(state, self.config),
-            BrakingAnalyser(state, self.config),
-            StrategyAnalyser(state, self.config),
-            DamageAnalyser(state, self.config),
-            EventAnalyser(state, self.config),
-        ]
-        self.insight_history: deque = deque(maxlen=self.INSIGHT_HISTORY_SIZE)
-        self._tick_count: int = 0
-        self._last_tick_ts: float = 0.0
+        self.require_live = require_live
+        self.lap = LapAnalyser(state, self.config)
+        self.tyre = TyreAnalyser(state, self.config)
+        self.fuel = FuelAnalyser(state, self.config)
+        self.ers = ERSAnalyser(state, self.config)
+        self.braking = BrakingAnalyser(state, self.config, corner_lookup)
+        self.strategy = StrategyAnalyser(state, self.config)
+        self.damage = DamageAnalyser(state, self.config)
+        self.events = EventAnalyser(state, self.config)
+        self._analysers: List[BaseAnalyser] = [self.lap, self.tyre, self.fuel, self.ers, self.braking,
+                                               self.strategy, self.damage, self.events]
+        self.insight_history: Deque[Insight] = deque(maxlen=self.MAX_HISTORY)
+        self._tick_count = 0
 
     def tick(self) -> List[Insight]:
-        if not self.state.is_live:
+        if self.require_live and not self.state.is_live:
             return []
-        if self.state.player is None:
-            return []
-        all_insights: List[Insight] = []
-        for analyser in self._analysers:
-            try:
-                results = analyser.analyse()
-                all_insights.extend(results)
-            except Exception as e:
-                pass
-
-        all_insights.sort(key=lambda i: i.priority.value)
-
-        self.insight_history.extend(all_insights)
-
         self._tick_count += 1
-        self._last_tick_ts = time.perf_counter()
+        new: List[Insight] = []
+        lock = getattr(self.state, "_lock", None)
+        for a in self._analysers:
+            try:
+                if lock:
+                    with lock:
+                        new += a.analyse()
+                else:
+                    new += a.analyse()
+            except Exception:
+                logger.exception(f"{type(a).__name__}.analyse() failed")
+        new.sort(key=lambda i: i.priority.value)
+        self.insight_history.extend(new)
+        return new
 
-        return all_insights
-
-    def get_recent_insights(self, n: int = 10, priority: Optional[InsightPriority] = None, insight_type: Optional[InsightType] = None) -> List[Insight]:
-        results = list(self.insight_history)
-        if priority is not None:
-            results = [i for i in results if i.priority == priority]
-        if insight_type is not None:
-            results = [i for i in results if i.insight_type == insight_type]
-        return results[-n:][::-1]
-
-    def get_braking_profile(self) -> Dict:
-        for analyser in self._analysers:
-            if isinstance(analyser, BrakingAnalyser):
-                return analyser.get_braking_profile()
-        return {}
+    def set_feedback_level(self, level: str) -> None:
+        if level not in FEEDBACK_MULTIPLIER:
+            raise ValueError(f"feedback level must be one of {list(FEEDBACK_MULTIPLIER)}")
+        self.config.feedback_level = level
 
     def notify_new_stint(self) -> None:
-        for analyser in self._analysers:
-            if isinstance(analyser, TyreAnalyser):
-                analyser.reset_for_new_stint()
+        self.tyre.reset_for_new_stint()
+
+    def get_recent_insights(self, n: int = 10, insight_type: Optional[InsightType] = None, max_age_s: Optional[float] = None) -> List[Insight]:
+        out = []
+        for ins in reversed(self.insight_history):
+            if insight_type is not None and ins.insight_type != insight_type:
+                continue
+            if max_age_s is not None and _now() - ins.timestamp > max_age_s:
+                continue
+            out.append(ins)
+            if len(out) >= n:
+                break
+        return out
+
+    def get_latest(self, insight_type: InsightType) -> Optional[Insight]:
+        r = self.get_recent_insights(1, insight_type)
+        return r[0] if r else None
 
     @property
     def tick_count(self) -> int:
@@ -1201,11 +1066,7 @@ class AnalyticsEngine:
 
     def __repr__(self) -> str:
         return (
-            f"AnalysticsEngine("
-            f"ticks={self._tick_count}, "
-            f"analysers={len(self._analysers)}, "
-            f"history={len(self.insight_history)}"
-            f")"
+            f"AnalysticsEngine(ticks={self._tick_count}, analysers={len(self._analysers)}, history={len(self.insight_history)})"
         )
 
 ## UTILITY HELPERS
@@ -1214,9 +1075,6 @@ def _format_delta_ms(delta_ms: int) -> str:
     if delta_ms == 0:
         return "=0.000"
     sign = "+" if delta_ms > 0 else "-"
-    abs_ms = abs(delta_ms)
-    secs = abs_ms // 1000
-    millis = abs_ms % 1000
-    if secs > 0:
-        return f"{sign}{secs}.{millis:03d}"
-    return f"{sign}0.{millis:03d}"
+    a = abs(delta_ms)
+    secs, millis = a // 1000, a % 1000
+    return f"{sign}{secs}.{millis:03d}" if secs else f"{sign}0.{millis:03d}"
